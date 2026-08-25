@@ -2,12 +2,15 @@ package snapshot
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/MobAI-App/ios-builder/internal/transport"
 )
 
 func TestCreateCapturesWorkingTreeWithoutTouchingRepo(t *testing.T) {
@@ -43,6 +46,61 @@ func TestCreateCapturesWorkingTreeWithoutTouchingRepo(t *testing.T) {
 	}
 	if got := run(t, repo, "status", "--porcelain"); got != statusBefore {
 		t.Errorf("status = %q, want unchanged %q", got, statusBefore)
+	}
+}
+
+func TestCreateSplitsLargeFilesIntoBoundedSnapshotChunks(t *testing.T) {
+	repo := initRepo(t)
+	largePath := filepath.Join(repo, "ios", "Libraries", "libLarge.a")
+	if err := os.MkdirAll(filepath.Dir(largePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Create(largePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(transport.LargeFileThreshold + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sha, err := Create(context.Background(), "snapshot test")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	paths := run(t, repo, "ls-tree", "-r", "--name-only", sha)
+	if strings.Contains(paths, "ios/Libraries/libLarge.a") {
+		t.Fatal("large source file remained as an oversized Git blob")
+	}
+	if !strings.Contains(paths, transport.ManifestPath) || !strings.Contains(paths, transport.ChunkRoot+"/") {
+		t.Fatalf("snapshot transport files missing from tree:\n%s", paths)
+	}
+
+	rawManifest := run(t, repo, "show", sha+":"+transport.ManifestPath)
+	var manifest transport.Manifest
+	if err := json.Unmarshal([]byte(rawManifest), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Files) != 1 || manifest.Files[0].Path != "ios/Libraries/libLarge.a" || len(manifest.Files[0].Chunks) != 2 {
+		t.Fatalf("unexpected transport manifest: %#v", manifest)
+	}
+	for _, chunk := range manifest.Files[0].Chunks {
+		if chunk.Size > transport.ChunkSize {
+			t.Fatalf("chunk size %d exceeds limit %d", chunk.Size, transport.ChunkSize)
+		}
+	}
+}
+
+func TestCreateRejectsReservedTransportNamespace(t *testing.T) {
+	repo := initRepo(t)
+	if err := os.MkdirAll(filepath.Join(repo, transport.Root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, repo, transport.ManifestPath, "source-owned")
+	if _, err := Create(context.Background(), "snapshot test"); err == nil {
+		t.Fatal("Create accepted a source file in the reserved transport namespace")
 	}
 }
 

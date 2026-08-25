@@ -87,6 +87,9 @@ func Create(ctx context.Context, message string) (string, error) {
 	if _, err := git(ctx, index, "add", "-A"); err != nil {
 		return "", err
 	}
+	if err := splitLargeFiles(ctx, index, dir); err != nil {
+		return "", err
+	}
 
 	tree, err := git(ctx, index, "write-tree")
 	if err != nil {

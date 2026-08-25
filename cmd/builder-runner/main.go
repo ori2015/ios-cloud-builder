@@ -33,6 +33,8 @@ func run(args []string) error {
 		return detect(args[1:])
 	case "verify-checkout":
 		return verifyCheckout(args[1:])
+	case "restore-snapshot":
+		return restoreSnapshot(args[1:])
 	case "execute":
 		return execute(args[1:])
 	case "deploy-testflight":
@@ -133,6 +135,20 @@ func verifyCheckout(args []string) error {
 		return err
 	}
 	fmt.Println("Private checkout contains no persisted credential")
+	return nil
+}
+
+func restoreSnapshot(args []string) error {
+	flags := newFlags("restore-snapshot")
+	var source string
+	flags.StringVar(&source, "source", "", "")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || !filepath.IsAbs(source) {
+		return fmt.Errorf("invalid snapshot restoration arguments")
+	}
+	if err := runner.RestoreLargeSnapshotFiles(source); err != nil {
+		return fmt.Errorf("large snapshot restoration failed")
+	}
+	fmt.Println("Private snapshot transport restored")
 	return nil
 }
 

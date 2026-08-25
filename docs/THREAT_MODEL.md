@@ -34,6 +34,8 @@ The App has only Metadata read and Contents read, and is installed using **Only 
 
 Both checkouts use `persist-credentials: false`. The App token is passed only to the private checkout and is explicitly revoked before dependency or build code runs. The build helper removes GitHub/Actions token and file-command variables from child environments. The workflow must never print environment variables, remotes, tokens, or secret values.
 
+Snapshot files approaching GitHub's blob limit are split into bounded chunks by the local CLI. After token revocation, the trusted runner validates the versioned manifest, relative paths, file and chunk sizes, SHA-256 digests, duplicate paths, symlink-free parents, and aggregate limits before reconstructing those files. It removes the reserved transport namespace before any private project tooling executes.
+
 ### Input, expression, path, and shell injection
 
 The trusted Go helper validates UUID, owner, repository, exact snapshot ref, relative iOS path, scheme, configuration, framework enum, and X25519 recipient before token minting. Private paths are resolved after checkout and must remain inside the source root. Build processes receive fixed argv arrays; there is no `eval`, arbitrary command, arbitrary script, or generic shell input.

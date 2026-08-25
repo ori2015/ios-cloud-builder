@@ -229,6 +229,8 @@ builder ios build
 
 The command snapshots staged, unstaged, and untracked non-ignored files without modifying the branch, real index, or working tree. It pushes only the temporary private ref, dispatches the public builder, shows high-level progress, downloads ciphertext, decrypts locally, validates the IPA ZIP and app structure, and writes:
 
+Regular files larger than 45 MiB are represented in that temporary ref as verified 40 MiB transport chunks. The trusted runner reconstructs them after revoking the private-repository token, so generated Unity/Xcode files can exceed GitHub's 100 MB per-blob limit without Git LFS. The transport namespace is removed before framework detection or project code runs.
+
 ```text
 ./dist/MyApp.ipa
 ```
