@@ -58,6 +58,7 @@ type appleCredentials struct {
 	apiKey      string
 	apiKeyID    string
 	issuerID    string
+	betaGroups  string
 }
 
 type provisioningProfile struct {
@@ -140,6 +141,7 @@ func takeAppleCredentials() (*appleCredentials, error) {
 		apiKey:      take("ASC_API_KEY_P8"),
 		apiKeyID:    take("ASC_KEY_ID"),
 		issuerID:    take("ASC_ISSUER_ID"),
+		betaGroups:  take("TESTFLIGHT_BETA_GROUPS"),
 	}
 	if credentials.ageIdentity == "" || credentials.p12 == "" || credentials.p12Password == "" ||
 		(credentials.profile == "" && credentials.profiles == "") || credentials.teamID == "" || credentials.apiKey == "" ||
@@ -190,7 +192,11 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, credentia
 	if err := setBundleBuildNumber(filepath.Join(appPath, "Info.plist"), options.BuildNumber); err != nil {
 		return err
 	}
-	bundleID, err := readBundleID(filepath.Join(appPath, "Info.plist"))
+	bundleID, marketingVersion, err := readAppMetadata(filepath.Join(appPath, "Info.plist"))
+	if err != nil {
+		return err
+	}
+	betaGroup, err := betaGroupForBundle(credentials.betaGroups, bundleID)
 	if err != nil {
 		return err
 	}
@@ -297,6 +303,23 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, credentia
 		return fmt.Errorf("upload to App Store Connect failed")
 	}
 	_, _ = fmt.Fprintln(privateLog, "App Store Connect accepted the signed IPA upload.")
+	if betaGroup != nil {
+		if credentials.issuerID == "" {
+			return fmt.Errorf("beta group publishing requires an App Store Connect issuer ID")
+		}
+		publisher, err := newAppStoreConnectClient(credentials.apiKeyID, credentials.issuerID, credentials.apiKey)
+		if err != nil {
+			return err
+		}
+		if err := publishToBetaGroup(ctx, publisher, betaPublishRequest{
+			BundleID:         bundleID,
+			MarketingVersion: marketingVersion,
+			BuildNumber:      options.BuildNumber,
+			Group:            *betaGroup,
+		}, privateLog); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -509,18 +532,20 @@ func signApplication(run executor, appPath, identity, entitlementsPath, keychain
 	return run.run(filepath.Dir(appPath), "/usr/bin/codesign", "--verify", "--deep", "--strict", appPath)
 }
 
-func readBundleID(infoPath string) (string, error) {
+func readAppMetadata(infoPath string) (string, string, error) {
 	data, err := os.ReadFile(infoPath)
 	if err != nil || len(data) > 4*1024*1024 {
-		return "", fmt.Errorf("read application Info.plist")
+		return "", "", fmt.Errorf("read application Info.plist")
 	}
 	var info struct {
-		BundleID string `plist:"CFBundleIdentifier"`
+		BundleID         string `plist:"CFBundleIdentifier"`
+		MarketingVersion string `plist:"CFBundleShortVersionString"`
 	}
-	if _, err := plist.Unmarshal(data, &info); err != nil || info.BundleID == "" || strings.ContainsAny(info.BundleID, "\r\n\x00") {
-		return "", fmt.Errorf("read application bundle identifier")
+	if _, err := plist.Unmarshal(data, &info); err != nil || info.BundleID == "" || info.MarketingVersion == "" ||
+		strings.ContainsAny(info.BundleID+info.MarketingVersion, "\r\n\x00") {
+		return "", "", fmt.Errorf("read application metadata")
 	}
-	return info.BundleID, nil
+	return info.BundleID, info.MarketingVersion, nil
 }
 
 func profileMatchesBundle(applicationID, teamID, bundleID string) bool {

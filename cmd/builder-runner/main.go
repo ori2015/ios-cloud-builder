@@ -63,7 +63,7 @@ func deployTestFlight(args []string) error {
 		}
 		return fmt.Errorf("secure TestFlight deployment preparation failed")
 	}
-	fmt.Println("App Store Connect accepted the upload; encrypted diagnostics are ready")
+	fmt.Println("App Store Connect deployment completed; encrypted diagnostics are ready")
 	return nil
 }
 

@@ -149,6 +149,7 @@ Configure these values in `apple-production`:
 | Kind | Name | Format |
 |---|---|---|
 | Environment variable | `APPLE_TEAM_ID` | 10-character Apple Team ID |
+| Environment variable | `TESTFLIGHT_BETA_GROUPS` | optional JSON map of Bundle IDs to existing beta groups |
 | Environment secret | `APPLE_SIGNING_AGE_IDENTITY` | dedicated AGE identity |
 | Environment secret | `APPLE_DISTRIBUTION_P12` | base64-encoded `.p12` |
 | Environment secret | `APPLE_DISTRIBUTION_P12_PASSWORD` | `.p12` password |
@@ -163,6 +164,8 @@ user whose app access is restricted to the applications this builder may upload.
 Individual keys do not use an issuer ID and cannot call Apple's provisioning
 endpoints; that is compatible with this manual-profile signing path. If a Team
 key is used instead, it applies across all apps and `ASC_ISSUER_ID` is required.
+Beta-group publishing also requires a Team key with `ASC_ISSUER_ID`; upload-only
+applications may continue using an Individual key.
 Revoke and replace any certificate, API key, or GitHub App key that was ever
 committed, pasted into a public log, or otherwise exposed; moving an exposed
 credential into a secret does not make the old credential safe.
@@ -171,6 +174,26 @@ Create the multi-application profile bundle on a trusted workstation. Filenames
 are only labels: the protected runner selects a profile from its signed
 `application-identifier` entitlement and requires an exact Bundle ID match.
 Keep only App Store distribution profiles for `APPLE_TEAM_ID` in this ZIP.
+
+To wait for processing and publish selected applications to existing TestFlight
+groups, configure `TESTFLIGHT_BETA_GROUPS` in `apple-production`. Both immutable
+group ID and public-link ID are required and verified before mutation:
+
+```json
+{
+  "com.example.app": {
+    "group_id": "00000000-0000-0000-0000-000000000000",
+    "public_link_id": "abcd1234",
+    "submit_beta_review": true
+  }
+}
+```
+
+Applications absent from the map retain upload-only behavior. Configured builds
+are selected by exact app, marketing version, and build number; the runner waits
+up to 40 minutes for Apple processing, updates What to Test, attaches the build
+additively, preserves the public link, and submits external builds for Beta App
+Review when prerequisites are complete.
 
 ```bash
 umask 077
@@ -345,7 +368,7 @@ go build ./cmd/builder-runner
 - A malicious project or dependency runs as the runner user and is not strongly sandboxed.
 - The central hosted-runner design has the policy caveat described in [COMPLIANCE.md](COMPLIANCE.md).
 - Central TestFlight supports multiple top-level applications by exact Bundle ID, but still rejects embedded app extensions, Watch apps, App Clips, and XPC services that require nested-bundle signing and additional profiles.
-- A successful upload means App Store Connect accepted the binary; it does not mean Apple's asynchronous processing or review has completed.
+- Applications without `TESTFLIGHT_BETA_GROUPS` retain upload-only semantics: acceptance does not mean Apple's asynchronous processing or review has completed.
 - Private GitHub SSH aliases are rejected in central mode because the CLI cannot prove an alias resolves to GitHub; use an explicit `git@github.com:OWNER/REPO.git` or `https://github.com/OWNER/REPO.git` remote.
 - Failed artifact deletion is non-fatal; ciphertext expires after one day.
 

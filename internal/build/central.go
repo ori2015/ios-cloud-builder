@@ -172,7 +172,7 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 	}
 	if opts.TestFlight {
 		result.Duration = time.Since(started)
-		c.progress.Complete(PhaseBuilding, "Signed upload accepted by App Store Connect")
+		c.progress.Complete(PhaseBuilding, "Signed TestFlight deployment completed")
 		c.progress.Finish()
 		return result, nil
 	}

@@ -283,7 +283,7 @@ jobs:
     needs: build
     environment: apple-production
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
 
@@ -325,6 +325,7 @@ jobs:
           ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          TESTFLIGHT_BETA_GROUPS: ${{ vars.TESTFLIGHT_BETA_GROUPS }}
           ARTIFACT_RECIPIENT: ${{ inputs.artifact_recipient }}
           TESTFLIGHT_BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
         run: |
@@ -361,4 +362,4 @@ jobs:
             echo "TestFlight deployment failed. Download the encrypted diagnostic log using Builder CLI."
             exit 1
           fi
-          echo "App Store Connect accepted the upload."
+          echo "App Store Connect deployment completed. Configured beta-group publishing, when present, also completed."

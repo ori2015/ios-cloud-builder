@@ -128,12 +128,13 @@ func TestTakeAppleCredentialsUnsetsEnvironment(t *testing.T) {
 		"ASC_API_KEY_P8":                  "key",
 		"ASC_KEY_ID":                      "KEY1234567",
 		"ASC_ISSUER_ID":                   "00000000-0000-0000-0000-000000000000",
+		"TESTFLIGHT_BETA_GROUPS":          `{"com.example.app":{"group_id":"87331d26-d22c-4c6f-a855-081491d718b2","public_link_id":"abcd1234"}}`,
 	}
 	for name, value := range values {
 		t.Setenv(name, value)
 	}
 	credentials, err := takeAppleCredentials()
-	if err != nil || credentials.teamID != "TEAM123456" || credentials.p12Password != " password " {
+	if err != nil || credentials.teamID != "TEAM123456" || credentials.p12Password != " password " || credentials.betaGroups == "" {
 		t.Fatalf("takeAppleCredentials() = %#v, %v", credentials, err)
 	}
 	for name := range values {
