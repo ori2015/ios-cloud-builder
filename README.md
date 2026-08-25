@@ -170,7 +170,7 @@ Configure these values in `apple-production`:
 | Kind | Name | Format |
 |---|---|---|
 | Environment variable | `APPLE_TEAM_ID` | 10-character Apple Team ID |
-| Environment variable | `TESTFLIGHT_BETA_GROUPS` | optional JSON map of Bundle IDs to existing beta groups |
+| Environment secret | `TESTFLIGHT_BETA_GROUPS` | optional JSON map of Bundle IDs to existing beta groups; secret-scoped so GitHub masks the map before the signing step starts |
 | Environment secret | `APPLE_SIGNING_AGE_IDENTITY` | dedicated AGE identity |
 | Environment secret | `APPLE_DISTRIBUTION_P12` | base64-encoded `.p12` |
 | Environment secret | `APPLE_DISTRIBUTION_P12_PASSWORD` | `.p12` password |
@@ -197,8 +197,10 @@ are only labels: the protected runner selects a profile from its signed
 Keep only App Store distribution profiles for `APPLE_TEAM_ID` in this ZIP.
 
 To wait for processing and publish selected applications to existing TestFlight
-groups, configure `TESTFLIGHT_BETA_GROUPS` in `apple-production`. Both immutable
-group ID and public-link ID are required and verified before mutation:
+groups, configure the `TESTFLIGHT_BETA_GROUPS` Environment secret in
+`apple-production`. It must be a secret rather than an Actions variable because
+GitHub renders step environment variables before in-step masking can run. Both
+immutable group ID and public-link ID are required and verified before mutation:
 
 ```json
 {

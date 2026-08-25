@@ -416,7 +416,7 @@ jobs:
           ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          TESTFLIGHT_BETA_GROUPS: ${{ vars.TESTFLIGHT_BETA_GROUPS }}
+          TESTFLIGHT_BETA_GROUPS: ${{ secrets.TESTFLIGHT_BETA_GROUPS }}
           ARTIFACT_RECIPIENT: ${{ inputs.artifact_recipient }}
           TESTFLIGHT_BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
         run: |

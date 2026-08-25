@@ -96,7 +96,7 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 		"actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26", "verify-provenance", "provenance.json",
 		"APPLE_SIGNING_AGE_IDENTITY", "APPLE_DISTRIBUTION_P12", "APPLE_PROVISIONING_PROFILE", "APPLE_PROVISIONING_PROFILES",
 		"ASC_API_KEY_P8", "deploy-testflight", "--build-number", "github.run_number", "github.run_attempt", "ios-builder-deploy-${{ inputs.build_id }}",
-		"TESTFLIGHT_BETA_GROUPS: ${{ vars.TESTFLIGHT_BETA_GROUPS }}",
+		"TESTFLIGHT_BETA_GROUPS: ${{ secrets.TESTFLIGHT_BETA_GROUPS }}",
 		"notify-approval:", "TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}", "TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}",
 		"APPROVAL_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
 	} {
@@ -113,6 +113,7 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 	for _, forbidden := range []string{
 		"path: source", "APP_PRIVATE_KEY", "source-token", "source_owner", "source_repo",
 		"App.ipa\n", "App.ipa.age\n          retention-days",
+		"TESTFLIGHT_BETA_GROUPS: ${{ vars.TESTFLIGHT_BETA_GROUPS }}",
 	} {
 		if strings.Contains(deployJob, forbidden) {
 			t.Errorf("protected deployment job contains forbidden text %q", forbidden)
