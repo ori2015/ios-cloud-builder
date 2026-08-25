@@ -121,6 +121,13 @@ not allow unreviewed workflow changes. For a single-operator repository, leave
 approve it. Environment approval is the point at which Apple credentials become
 available to the signing job.
 
+To receive a Telegram message as soon as a successful unsigned build is ready
+for that approval, configure repository secrets `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_CHAT_ID` in the public builder. The notification job checks out no
+source and sends only the public build ID and Actions approval URL. Notification
+failure is reported as a warning and never blocks or fails the protected
+deployment.
+
 Generate a dedicated AGE identity for transport between the two jobs. Put its
 public recipient in the repository variable `APPLE_SIGNING_RECIPIENT`; put the
 identity itself only in the Environment secret `APPLE_SIGNING_AGE_IDENTITY`.

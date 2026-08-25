@@ -243,6 +243,41 @@ jobs:
           fi
           echo "Build succeeded. Encrypted artifacts uploaded."
 
+  notify-approval:
+    name: Notify that TestFlight approval is required
+    if: inputs.operation == 'testflight' && needs.build.result == 'success'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Send protected deployment link to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BUILD_ID: ${{ inputs.build_id }}
+          APPROVAL_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "::warning::Telegram approval notification is not configured."
+            exit 0
+          fi
+
+          message=$(printf '%s\n\n%s <code>%s</code>\n<a href="%s">Review deployment →</a>' \
+            '🔐 <b>TestFlight approval required</b>' \
+            'Build' "$BUILD_ID" "$APPROVAL_URL")
+
+          if ! curl --silent --show-error --fail \
+            --request POST \
+            --url "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "disable_web_page_preview=true" \
+            --data-urlencode "text=${message}" \
+            --output /dev/null; then
+            echo "::warning::Could not send the Telegram approval notification."
+          fi
+
   sign-and-deploy:
     if: inputs.operation == 'testflight'
     needs: build

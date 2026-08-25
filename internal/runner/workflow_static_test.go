@@ -94,6 +94,8 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 		"operation:", "environment: apple-production", "APPLE_SIGNING_RECIPIENT",
 		"APPLE_SIGNING_AGE_IDENTITY", "APPLE_DISTRIBUTION_P12", "APPLE_PROVISIONING_PROFILE", "APPLE_PROVISIONING_PROFILES",
 		"ASC_API_KEY_P8", "deploy-testflight", "--build-number", "github.run_number", "github.run_attempt", "ios-builder-deploy-${{ inputs.build_id }}",
+		"notify-approval:", "TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}", "TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}",
+		"APPROVAL_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
 	} {
 		if !strings.Contains(text, required) {
 			t.Errorf("central workflow missing %q", required)
@@ -112,6 +114,10 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 		if strings.Contains(deployJob, forbidden) {
 			t.Errorf("protected deployment job contains forbidden text %q", forbidden)
 		}
+	}
+	telegramToken := regexp.MustCompile(`\b[0-9]{6,}:[A-Za-z0-9_-]{20,}\b`)
+	if telegramToken.MatchString(text) {
+		t.Error("central workflow contains a plaintext Telegram bot token")
 	}
 	for _, forbidden := range []string{
 		"pull_request:", "pull_request_target:", "issue_comment:", "workflow_run:",
