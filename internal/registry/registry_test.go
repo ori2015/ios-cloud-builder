@@ -108,8 +108,14 @@ func TestLocalRegistryFileIsPrivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0600 {
-		t.Fatalf("registry mode = %v, %v", info.Mode(), err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.PathSeparator == '\\' {
+		t.Skip("Windows does not expose POSIX permission mode bits")
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("registry mode = %v", info.Mode())
 	}
 	if err := os.Chmod(path, 0644); err != nil {
 		t.Fatal(err)
