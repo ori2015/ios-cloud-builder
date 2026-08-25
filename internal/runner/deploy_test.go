@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -198,7 +199,7 @@ func TestMaterializeProvisioningProfilesSupportsLegacyAndBundle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("stat profile %q: %v", profilePath, err)
 		}
-		if info.Mode().Perm() != 0600 {
+		if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 			t.Fatalf("profile %q mode = %v", profilePath, info.Mode())
 		}
 	}
