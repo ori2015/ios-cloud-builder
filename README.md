@@ -332,10 +332,14 @@ timeout includes that approval window and can be changed with `--timeout`. On
 success, App Store Connect has accepted the upload for processing; TestFlight
 processing itself is asynchronous. No signed IPA is downloaded or retained as a
 GitHub artifact.
-The protected job replaces only `CFBundleVersion` with the unique GitHub Actions
-`run_number.run_attempt` value before signing; the application's
-`CFBundleShortVersionString` is preserved. It validates the signed IPA with App
-Store Connect before uploading it.
+The protected job queries App Store Connect for the application's existing builds
+under the current marketing version, increments the highest leading build-number
+component, and replaces only `CFBundleVersion` before signing. This preserves one
+monotonic sequence across legacy and central workflows instead of depending on a
+workflow-local GitHub run counter. The application's
+`CFBundleShortVersionString` is preserved. Automatic numbering requires
+`ASC_ISSUER_ID`. The job validates the signed IPA with App Store Connect before
+uploading it.
 
 ## Supported projects
 

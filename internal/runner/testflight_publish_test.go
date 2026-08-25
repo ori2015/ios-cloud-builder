@@ -135,6 +135,67 @@ func TestPublishToBetaGroupWaitsAttachesAndSubmits(t *testing.T) {
 	}
 }
 
+func TestNextASCBuildNumberContinuesExistingIntegerSequence(t *testing.T) {
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/apps":
+			if r.URL.Query().Get("filter[bundleId]") != "com.example.app" {
+				t.Fatalf("unexpected app query: %s", r.URL.RawQuery)
+			}
+			writeASCJSON(w, `{"data":[{"type":"apps","id":"app1","attributes":{"bundleId":"com.example.app"}}]}`)
+		case "/v1/builds":
+			if r.URL.Query().Get("filter[app]") != "app1" ||
+				r.URL.Query().Get("filter[preReleaseVersion.version]") != "0.1.0" {
+				t.Fatalf("unexpected build query: %s", r.URL.RawQuery)
+			}
+			if r.URL.Query().Get("cursor") == "second" {
+				writeASCJSON(w, `{"data":[{"type":"builds","id":"b3","attributes":{"version":"17.1"}}]}`)
+				return
+			}
+			writeASCJSON(w, `{"data":[`+
+				`{"type":"builds","id":"b1","attributes":{"version":"36"}},`+
+				`{"type":"builds","id":"b2","attributes":{"version":"16.1"}}],`+
+				`"links":{"next":"`+serverURL+`/v1/builds?cursor=second&filter%5Bapp%5D=app1&filter%5BpreReleaseVersion.version%5D=0.1.0"}}`)
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+	client, _ := testASCClient(t, server.Client())
+	client.baseURL = server.URL
+
+	number, err := nextASCBuildNumber(t.Context(), client, "com.example.app", "0.1.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if number != "37" {
+		t.Fatalf("next build number = %q, want 37", number)
+	}
+}
+
+func TestNextASCBuildNumberStartsAtOne(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/apps":
+			writeASCJSON(w, `{"data":[{"type":"apps","id":"app1","attributes":{"bundleId":"com.example.app"}}]}`)
+		case "/v1/builds":
+			writeASCJSON(w, `{"data":[]}`)
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client, _ := testASCClient(t, server.Client())
+	client.baseURL = server.URL
+
+	number, err := nextASCBuildNumber(t.Context(), client, "com.example.app", "0.1.0")
+	if err != nil || number != "1" {
+		t.Fatalf("next build number = %q, %v", number, err)
+	}
+}
+
 func testASCClient(t *testing.T, httpClient *http.Client) (*appStoreConnectClient, *ecdsa.PrivateKey) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

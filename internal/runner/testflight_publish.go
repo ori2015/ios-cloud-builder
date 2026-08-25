@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -55,7 +56,10 @@ type ascResource struct {
 }
 
 type ascListResponse struct {
-	Data []ascResource `json:"data"`
+	Data  []ascResource `json:"data"`
+	Links struct {
+		Next string `json:"next"`
+	} `json:"links"`
 }
 
 type ascSingleResponse struct {
@@ -308,6 +312,67 @@ func findASCApp(ctx context.Context, api *appStoreConnectClient, bundleID string
 		}
 	}
 	return "", fmt.Errorf("no exact App Store Connect app exists for the uploaded bundle identifier")
+}
+
+func nextASCBuildNumber(ctx context.Context, api *appStoreConnectClient, bundleID, marketingVersion string) (string, error) {
+	if api == nil || !bundleIDPattern.MatchString(bundleID) || !marketingPattern.MatchString(marketingVersion) {
+		return "", fmt.Errorf("invalid TestFlight build numbering metadata")
+	}
+	appID, err := findASCApp(ctx, api, bundleID)
+	if err != nil {
+		return "", err
+	}
+	apiPath := "/v1/builds"
+	query := url.Values{
+		"filter[app]":                       {appID},
+		"filter[preReleaseVersion.version]": {marketingVersion},
+		"limit":                             {"200"},
+	}
+	var highest uint64
+	for page := 0; page < 100; page++ {
+		var response ascListResponse
+		if err := api.request(ctx, http.MethodGet, apiPath, query, nil, &response); err != nil {
+			return "", err
+		}
+		for _, resource := range response.Data {
+			var attributes struct {
+				Version string `json:"version"`
+			}
+			if err := json.Unmarshal(resource.Attributes, &attributes); err != nil || !buildPattern.MatchString(attributes.Version) {
+				return "", fmt.Errorf("parse App Store Connect build number")
+			}
+			first := strings.SplitN(attributes.Version, ".", 2)[0]
+			value, err := strconv.ParseUint(first, 10, 64)
+			if err != nil {
+				return "", fmt.Errorf("parse App Store Connect build number")
+			}
+			if value > highest {
+				highest = value
+			}
+		}
+		if response.Links.Next == "" {
+			next := strconv.FormatUint(highest+1, 10)
+			if highest == ^uint64(0) || !buildPattern.MatchString(next) {
+				return "", fmt.Errorf("cannot increment App Store Connect build number")
+			}
+			return next, nil
+		}
+		apiPath, query, err = validatedASCNextPage(api.baseURL, response.Links.Next)
+		if err != nil {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("too many App Store Connect build pages")
+}
+
+func validatedASCNextPage(baseURL, next string) (string, url.Values, error) {
+	base, baseErr := url.Parse(baseURL)
+	page, pageErr := url.Parse(next)
+	if baseErr != nil || pageErr != nil || page.Scheme != base.Scheme || page.Host != base.Host || page.User != nil ||
+		page.Fragment != "" || page.Path != "/v1/builds" {
+		return "", nil, fmt.Errorf("invalid App Store Connect pagination link")
+	}
+	return page.Path, page.Query(), nil
 }
 
 func findASCBetaGroup(ctx context.Context, api *appStoreConnectClient, appID string, configured betaGroupConfig) (ascBetaGroup, error) {

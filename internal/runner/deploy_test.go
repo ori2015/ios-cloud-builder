@@ -401,7 +401,7 @@ func TestTestFlightBuildNumberValidation(t *testing.T) {
 			t.Fatalf("build number %q was accepted", number)
 		}
 	}
-	for _, number := range []string{"1", "42.1", "9999.99.99"} {
+	for _, number := range []string{"auto", "1", "42.1", "9999.99.99"} {
 		options := &TestFlightOptions{
 			EncryptedIPAPath: filepath.Join(root, "intermediate", "App.ipa.age"),
 			ManifestPath:     filepath.Join(root, "intermediate", "provenance.json"),

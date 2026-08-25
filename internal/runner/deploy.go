@@ -30,6 +30,7 @@ const (
 	maxSecretBytes    = 2 * 1024 * 1024
 	maxProfiles       = 100
 	maxProfileBytes   = 512 * 1024
+	autoBuildNumber   = "auto"
 )
 
 var (
@@ -124,7 +125,7 @@ func (options *TestFlightOptions) validate() error {
 		filepath.Dir(options.EncryptedIPAPath) != filepath.Dir(options.ManifestPath) || options.Expected.validate() != nil {
 		return fmt.Errorf("invalid deployment paths")
 	}
-	if !buildPattern.MatchString(options.BuildNumber) {
+	if options.BuildNumber != autoBuildNumber && !buildPattern.MatchString(options.BuildNumber) {
 		return fmt.Errorf("invalid TestFlight build number")
 	}
 	return nil
@@ -203,15 +204,32 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 	if err := rejectNestedApplications(appPath); err != nil {
 		return err
 	}
-	if err := setBundleBuildNumber(filepath.Join(appPath, "Info.plist"), options.BuildNumber); err != nil {
-		return err
-	}
-	bundleID, marketingVersion, err := readAppMetadata(filepath.Join(appPath, "Info.plist"))
+	infoPath := filepath.Join(appPath, "Info.plist")
+	bundleID, marketingVersion, err := readAppMetadata(infoPath)
 	if err != nil {
 		return err
 	}
 	credentials, err := takeAppleCredentials()
 	if err != nil {
+		return err
+	}
+	buildNumber := options.BuildNumber
+	var publisher *appStoreConnectClient
+	if buildNumber == autoBuildNumber {
+		if credentials.issuerID == "" {
+			return fmt.Errorf("automatic TestFlight build numbering requires an App Store Connect issuer ID")
+		}
+		publisher, err = newAppStoreConnectClient(credentials.apiKeyID, credentials.issuerID, credentials.apiKey)
+		if err != nil {
+			return err
+		}
+		buildNumber, err = nextASCBuildNumber(ctx, publisher, bundleID, marketingVersion)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(privateLog, "Selected TestFlight build number %s after inspecting App Store Connect.\n", buildNumber)
+	}
+	if err := setBundleBuildNumber(infoPath, buildNumber); err != nil {
 		return err
 	}
 	betaGroup, err := betaGroupForBundle(credentials.betaGroups, bundleID)
@@ -325,14 +343,16 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 		if credentials.issuerID == "" {
 			return fmt.Errorf("beta group publishing requires an App Store Connect issuer ID")
 		}
-		publisher, err := newAppStoreConnectClient(credentials.apiKeyID, credentials.issuerID, credentials.apiKey)
-		if err != nil {
-			return err
+		if publisher == nil {
+			publisher, err = newAppStoreConnectClient(credentials.apiKeyID, credentials.issuerID, credentials.apiKey)
+			if err != nil {
+				return err
+			}
 		}
 		if err := publishToBetaGroup(ctx, publisher, &betaPublishRequest{
 			BundleID:         bundleID,
 			MarketingVersion: marketingVersion,
-			BuildNumber:      options.BuildNumber,
+			BuildNumber:      buildNumber,
 			Group:            *betaGroup,
 		}, privateLog); err != nil {
 			return err

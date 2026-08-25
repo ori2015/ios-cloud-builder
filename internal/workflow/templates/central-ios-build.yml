@@ -418,7 +418,6 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           TESTFLIGHT_BETA_GROUPS: ${{ secrets.TESTFLIGHT_BETA_GROUPS }}
           ARTIFACT_RECIPIENT: ${{ inputs.artifact_recipient }}
-          TESTFLIGHT_BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
         run: |
           "$RUNNER_TEMP/builder-runner" deploy-testflight \
             --encrypted-ipa "$RUNNER_TEMP/intermediate/App.ipa.age" \
@@ -428,7 +427,7 @@ jobs:
             --builder-commit "$GITHUB_SHA" \
             --workflow-ref "$GITHUB_WORKFLOW_REF" \
             --log "$RUNNER_TEMP/deploy-private/build.log" \
-            --build-number "$TESTFLIGHT_BUILD_NUMBER" \
+            --build-number auto \
             --recipient "$ARTIFACT_RECIPIENT" \
             --output "$RUNNER_TEMP/deploy-encrypted"
 
