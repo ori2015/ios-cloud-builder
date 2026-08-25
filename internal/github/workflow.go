@@ -448,7 +448,8 @@ func (c *Client) DeleteRunArtifactsByName(ctx context.Context, owner, repo strin
 		wanted[name] = struct{}{}
 	}
 	var deleteErrors []error
-	for _, artifact := range artifacts {
+	for index := range artifacts {
+		artifact := &artifacts[index]
 		if _, ok := wanted[artifact.Name]; !ok {
 			continue
 		}

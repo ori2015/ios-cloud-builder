@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"filippo.io/age"
+	"github.com/MobAI-App/ios-builder/internal/registry"
 )
 
 var (
@@ -13,6 +14,7 @@ var (
 	repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}$`)
 	workflowPattern   = regexp.MustCompile(`^[A-Za-z0-9_.-]+\.ya?ml$`)
 	schemePattern     = regexp.MustCompile(`^$|^[A-Za-z0-9][A-Za-z0-9 ._+()-]{0,127}$`)
+	projectIDPattern  = registry.ProjectIDPattern
 )
 
 // Backend identifies where a build workflow is executed.
@@ -33,17 +35,19 @@ const (
 
 // Config represents the builder.json configuration file
 type Config struct {
-	Project     string            `json:"project"`
-	Platform    string            `json:"platform"`
-	Backend     Backend           `json:"backend,omitempty"`
-	GitHub      GitHubConfig      `json:"github"`
-	Builder     BuilderConfig     `json:"builder,omitempty"`
-	Security    SecurityConfig    `json:"security,omitempty"`
-	IOS         IOSConfig         `json:"ios,omitempty"`
-	Flutter     FlutterConfig     `json:"flutter,omitempty"`
-	ReactNative ReactNativeConfig `json:"reactNative,omitempty"`
-	KMP         KMPConfig         `json:"kmp,omitempty"`
-	MobAI       MobAIConfig       `json:"mobai,omitempty"`
+	Project           string            `json:"project"`
+	ProjectID         string            `json:"project_id,omitempty"`
+	SnapshotNamespace string            `json:"snapshot_namespace,omitempty"`
+	Platform          string            `json:"platform"`
+	Backend           Backend           `json:"backend,omitempty"`
+	GitHub            GitHubConfig      `json:"github"`
+	Builder           BuilderConfig     `json:"builder,omitempty"`
+	Security          SecurityConfig    `json:"security,omitempty"`
+	IOS               IOSConfig         `json:"ios,omitempty"`
+	Flutter           FlutterConfig     `json:"flutter,omitempty"`
+	ReactNative       ReactNativeConfig `json:"reactNative,omitempty"`
+	KMP               KMPConfig         `json:"kmp,omitempty"`
+	MobAI             MobAIConfig       `json:"mobai,omitempty"`
 }
 
 // FlutterConfig holds Flutter-specific settings
@@ -159,6 +163,12 @@ func (c *Config) Validate() error {
 		return &ValidationError{Field: "backend", Message: "must be repository or central"}
 	}
 	if c.Backend == BackendCentral {
+		if !projectIDPattern.MatchString(c.ProjectID) {
+			return &ValidationError{Field: "project_id", Message: "run `builder central register` to create an opaque project ID"}
+		}
+		if !registry.SnapshotNamespacePattern.MatchString(c.SnapshotNamespace) {
+			return &ValidationError{Field: "snapshot_namespace", Message: "run `builder central register` to create a private snapshot namespace"}
+		}
 		if !validOwner(c.Builder.Owner) {
 			return &ValidationError{Field: "builder.owner", Message: "must be a valid GitHub owner"}
 		}

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"filippo.io/age"
+	"github.com/MobAI-App/ios-builder/internal/registry"
 )
 
 func validInputs(t *testing.T) Inputs {
@@ -21,15 +22,41 @@ func validInputs(t *testing.T) Inputs {
 	buildID := "123e4567-e89b-42d3-a456-426614174000"
 	return Inputs{
 		BuildID:           buildID,
-		SourceOwner:       "private-owner",
-		SourceRepo:        "private.app",
-		SnapshotRef:       "refs/ios-builder/jobs/" + buildID,
-		IOSPath:           "ios",
-		Scheme:            "My App",
-		Configuration:     "Release",
-		FrameworkHint:     FrameworkAuto,
+		ProjectID:         "p_0123456789abcdef0123456789abcdef",
 		ArtifactRecipient: identity.Recipient().String(),
 		Operation:         "build",
+	}
+}
+
+func TestResolveOpaqueProjectMasksBeforeOutputs(t *testing.T) {
+	in := validInputs(t)
+	value := registry.New()
+	project := &registry.Project{Owner: "private-owner", Repo: "private-repo", IOSPath: "ios", Scheme: "Private App", Configuration: "Debug", FrameworkHint: "auto", SnapshotNamespace: "11111111111111111111111111111111"}
+	if err := value.Put(in.ProjectID, project); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := value.Marshal()
+	outputPath := filepath.Join(t.TempDir(), "github-output")
+	if err := os.WriteFile(outputPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var commands bytes.Buffer
+	if err := ResolveProject(&in, string(data), outputPath, &commands); err != nil {
+		t.Fatal(err)
+	}
+	output, _ := os.ReadFile(outputPath)
+	for _, private := range []string{"private-owner", "private-repo", "Private App", "refs/ios-builder/jobs/11111111111111111111111111111111/" + in.BuildID} {
+		if !strings.Contains(commands.String(), "::add-mask::"+private) && !strings.Contains(commands.String(), private) {
+			t.Errorf("mask command missing %q", private)
+		}
+		if !strings.Contains(string(output), private) {
+			t.Errorf("trusted output missing %q", private)
+		}
+	}
+	unknown := in
+	unknown.ProjectID = "p_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if err := ResolveProject(&unknown, string(data), outputPath, &commands); err == nil {
+		t.Fatal("unknown opaque project accepted")
 	}
 }
 
@@ -45,17 +72,7 @@ func TestInputsValidate(t *testing.T) {
 		{"short build id", func(in *Inputs) { in.BuildID = "12345678" }},
 		{"uppercase UUID", func(in *Inputs) { in.BuildID = strings.ToUpper(in.BuildID) }},
 		{"non-v4 UUID", func(in *Inputs) { in.BuildID = "123e4567-e89b-72d3-a456-426614174000" }},
-		{"owner injection", func(in *Inputs) { in.SourceOwner = "owner\nother" }},
-		{"repo list", func(in *Inputs) { in.SourceRepo = "one,two" }},
-		{"git suffix", func(in *Inputs) { in.SourceRepo = "private.git" }},
-		{"unbound snapshot", func(in *Inputs) { in.SnapshotRef = "refs/heads/main" }},
-		{"other build snapshot", func(in *Inputs) { in.SnapshotRef += "x" }},
-		{"absolute path", func(in *Inputs) { in.IOSPath = "/tmp/ios" }},
-		{"traversal path", func(in *Inputs) { in.IOSPath = "../ios" }},
-		{"unclean path", func(in *Inputs) { in.IOSPath = "app/../ios" }},
-		{"scheme newline", func(in *Inputs) { in.Scheme = "App\nrun" }},
-		{"configuration", func(in *Inputs) { in.Configuration = "Profile" }},
-		{"framework", func(in *Inputs) { in.FrameworkHint = "shell" }},
+		{"project id", func(in *Inputs) { in.ProjectID = "private-owner-repo" }},
 		{"recipient", func(in *Inputs) { in.ArtifactRecipient = "age1invalid" }},
 		{"operation", func(in *Inputs) { in.Operation = "shell" }},
 	}
@@ -77,11 +94,15 @@ func TestChildEnvironmentScrubsActionsAndCredentials(t *testing.T) {
 	t.Setenv("RUNNER_TEMP", "/runner")
 	t.Setenv("APP_PRIVATE_KEY", "secret")
 	t.Setenv("AGE_RECIPIENT", "public-but-not-needed")
+	t.Setenv("APPLE_SIGNING_RECIPIENT", "public-but-not-needed")
+	t.Setenv("ARTIFACT_RECIPIENT", "public-but-not-needed")
+	t.Setenv("PACKAGING_RECIPIENT", "public-but-not-needed")
+	t.Setenv("PACKAGING_AGE_IDENTITY", "secret")
 	t.Setenv("PATH", "/usr/bin")
 	t.Setenv("HOME", "/sensitive-runner-home")
 	t.Setenv("JAVA_HOME", "/java")
 	env := strings.Join(ChildEnvironment("/source", "/isolated-home"), "\n")
-	for _, forbidden := range []string{"GITHUB_", "ACTIONS_", "RUNNER_", "APP_PRIVATE_KEY", "AGE_RECIPIENT", "secret", "/sensitive-runner-home"} {
+	for _, forbidden := range []string{"GITHUB_", "ACTIONS_", "RUNNER_", "APP_PRIVATE_KEY", "AGE_RECIPIENT", "RECIPIENT", "PACKAGING_", "secret", "/sensitive-runner-home"} {
 		if strings.Contains(env, forbidden) {
 			t.Fatalf("child environment leaked %q: %s", forbidden, env)
 		}

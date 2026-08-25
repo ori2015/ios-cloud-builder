@@ -20,6 +20,14 @@ func EncryptArtifacts(recipientText, logPath, ipaPath, outputDir string) error {
 // CLI while allowing a TestFlight intermediate IPA to be encrypted to a
 // distinct identity held only by the protected signing Environment.
 func EncryptArtifactsWithRecipients(logRecipientText, ipaRecipientText, logPath, ipaPath, outputDir string) error {
+	return encryptArtifactsWithRecipientsNamed(logRecipientText, ipaRecipientText, logPath, ipaPath, outputDir, "App.ipa.age")
+}
+
+func encryptArtifactsWithRecipientsNamed(logRecipientText, ipaRecipientText, logPath, ipaPath, outputDir, ipaName string) error {
+	if ipaName != "App.ipa.age" && ipaName != "project-output.age" {
+		removePlaintext(logPath, ipaPath)
+		return fmt.Errorf("invalid encrypted IPA output name")
+	}
 	logRecipient, err := age.ParseX25519Recipient(logRecipientText)
 	if err != nil {
 		removePlaintext(logPath, ipaPath)
@@ -48,7 +56,7 @@ func EncryptArtifactsWithRecipients(logRecipientText, ipaRecipientText, logPath,
 		removePlaintext(logPath, ipaPath)
 		return fmt.Errorf("inspect encrypted artifact directory")
 	}
-	for _, name := range []string{"build.log.age", "build.log.age.partial", "App.ipa.age", "App.ipa.age.partial"} {
+	for _, name := range []string{"build.log.age", "build.log.age.partial", "App.ipa.age", "App.ipa.age.partial", "project-output.age", "project-output.age.partial"} {
 		if err := os.RemoveAll(filepath.Join(outputDir, name)); err != nil {
 			removePlaintext(logPath, ipaPath)
 			return fmt.Errorf("clean encrypted artifact destination")
@@ -65,7 +73,7 @@ func EncryptArtifactsWithRecipients(logRecipientText, ipaRecipientText, logPath,
 	}
 	if ipaPath != "" {
 		if _, statErr := os.Stat(ipaPath); statErr == nil {
-			if err := encryptAndRemove(ipaRecipient, ipaPath, filepath.Join(outputDir, "App.ipa.age"), true); err != nil {
+			if err := encryptAndRemove(ipaRecipient, ipaPath, filepath.Join(outputDir, ipaName), true); err != nil {
 				return err
 			}
 		} else if !os.IsNotExist(statErr) {

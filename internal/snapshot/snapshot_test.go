@@ -136,6 +136,18 @@ func TestDeleteRejectsRefsOutsideNamespace(t *testing.T) {
 	}
 }
 
+func TestRefForNamespaceSeparatesOpaqueProjects(t *testing.T) {
+	buildID := "123e4567-e89b-42d3-a456-426614174000"
+	first := RefForNamespace("11111111111111111111111111111111", buildID)
+	second := RefForNamespace("22222222222222222222222222222222", buildID)
+	if first == second {
+		t.Fatal("private snapshot namespaces produced the same ref")
+	}
+	if first != "refs/ios-builder/jobs/11111111111111111111111111111111/"+buildID {
+		t.Fatalf("RefForNamespace() = %q", first)
+	}
+}
+
 func TestCleanupDeletesOnlyMarkedStaleSnapshots(t *testing.T) {
 	repo := initRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
@@ -157,6 +169,25 @@ func TestCleanupDeletesOnlyMarkedStaleSnapshots(t *testing.T) {
 	refs := run(t, repo, "ls-remote", remote, refPrefix+"*")
 	if strings.Contains(refs, Ref(oldID)) || !strings.Contains(refs, Ref(foreignID)) {
 		t.Fatalf("unexpected remaining refs: %s", refs)
+	}
+}
+
+func TestCleanupDeletesNamespacedStaleSnapshots(t *testing.T) {
+	repo := initRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	run(t, repo, "init", "--bare", remote)
+	tree := run(t, repo, "write-tree")
+	buildID := "323e4567-e89b-42d3-a456-426614174000"
+	sha := commitTreeAt(t, repo, tree, "ios-builder snapshot "+buildID, "2025-01-01T00:00:00Z")
+	ref := RefForNamespace("11111111111111111111111111111111", buildID)
+	run(t, repo, "push", remote, sha+":"+ref)
+
+	removed, err := Cleanup(context.Background(), remote, 24*time.Hour, time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 1 || removed[0].Ref != ref {
+		t.Fatalf("removed = %#v", removed)
 	}
 }
 

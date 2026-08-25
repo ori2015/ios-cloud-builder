@@ -36,6 +36,12 @@ func ExecuteSecure(ctx context.Context, options *BuildOptions, recipient, encryp
 // ExecuteSecureWithIPARecipient encrypts the build log for the local caller
 // and the unsigned IPA for either that caller or the protected signing job.
 func ExecuteSecureWithIPARecipient(ctx context.Context, options *BuildOptions, logRecipient, ipaRecipient, encryptedDir string) error {
+	return ExecuteSecureWithTransport(ctx, options, logRecipient, ipaRecipient, encryptedDir, false)
+}
+
+// ExecuteSecureWithTransport uses a distinct name for the untrusted encrypted
+// project output handed to the isolated trusted-packaging job.
+func ExecuteSecureWithTransport(ctx context.Context, options *BuildOptions, logRecipient, ipaRecipient, encryptedDir string, projectIntermediate bool) error {
 	if err := options.validate(); err != nil {
 		return err
 	}
@@ -49,7 +55,11 @@ func ExecuteSecureWithIPARecipient(ctx context.Context, options *BuildOptions, l
 		message := []byte("The iOS build could not start. No public diagnostic details were emitted.\n")
 		_ = os.WriteFile(options.LogPath, message, 0600)
 	}
-	if err := EncryptArtifactsWithRecipients(logRecipient, ipaRecipient, options.LogPath, options.IPAPath, encryptedDir); err != nil {
+	ipaName := "App.ipa.age"
+	if projectIntermediate {
+		ipaName = "project-output.age"
+	}
+	if err := encryptArtifactsWithRecipientsNamed(logRecipient, ipaRecipient, options.LogPath, options.IPAPath, encryptedDir, ipaName); err != nil {
 		return fmt.Errorf("encrypt private build artifacts")
 	}
 	if buildErr != nil {

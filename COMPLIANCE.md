@@ -2,7 +2,7 @@
 
 Last checked: 2026-08-24.
 
-This repository is an open-source iOS remote-build and orchestration project derived from [MobAI-App/ios-builder](https://github.com/MobAI-App/ios-builder). Its central backend accepts an authorized private application's temporary Git ref as build input, runs the project's iOS build, and returns only AGE-encrypted artifacts. Its optional protected deployment job signs an authenticated unsigned intermediate and uploads it directly to App Store Connect without retaining a signed artifact.
+This repository is an open-source iOS remote-build and orchestration project derived from [MobAI-App/ios-builder](https://github.com/MobAI-App/ios-builder). Its central backend accepts only an opaque registered project handle and random build ID, resolves the authorized private application's temporary Git ref inside trusted code, runs the project's iOS build, and returns only AGE-encrypted artifacts. Its optional protected deployment job verifies GitHub Sigstore provenance for an isolated trusted-packaging job, then signs the authenticated unsigned intermediate and uploads it directly to App Store Connect without retaining a signed artifact.
 
 ## GitHub-hosted runner caveat
 

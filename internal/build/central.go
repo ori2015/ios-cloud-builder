@@ -27,8 +27,10 @@ import (
 const (
 	centralArtifactPrefix = "ios-builder-"
 	centralDeployPrefix   = "ios-builder-deploy-"
+	centralTrustedPrefix  = "ios-builder-trusted-"
 	centralIPAFile        = "App.ipa.age"
 	centralLogFile        = "build.log.age"
+	centralProjectFile    = "project-output.age"
 
 	maxArtifactArchiveSize = int64(1024*1024*1024 + 80*1024*1024)
 	maxIPACiphertextSize   = int64(1024 * 1024 * 1024)
@@ -74,7 +76,7 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 		c.progress.Error(PhaseSnapshot, err)
 		return result, fmt.Errorf("failed to snapshot working tree: %w", err)
 	}
-	ref := snapshot.Ref(buildID)
+	ref := snapshot.RefForNamespace(c.config.SnapshotNamespace, buildID)
 	if err := snapshot.Push(ctx, opts.Remote, sha, ref); err != nil {
 		c.progress.Error(PhaseSnapshot, err)
 		return result, fmt.Errorf("failed to push private snapshot: %w", err)
@@ -84,7 +86,7 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 
 	owner, repo, workflow := c.config.Builder.Owner, c.config.Builder.Repo, c.config.Builder.Workflow
 	c.progress.Update(PhaseTriggering, "Triggering central GitHub Actions build...")
-	if err := c.github.TriggerWorkflow(ctx, owner, repo, workflow, centralDispatchInputs(c.config, buildID, ref, opts.TestFlight)); err != nil {
+	if err := c.github.TriggerWorkflow(ctx, owner, repo, workflow, centralDispatchInputs(c.config, buildID, opts.TestFlight)); err != nil {
 		c.progress.Error(PhaseTriggering, err)
 		return result, fmt.Errorf("failed to trigger central workflow: %w", err)
 	}
@@ -132,6 +134,11 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 		return result, fmt.Errorf("encrypted build artifact unavailable: %w", err)
 	}
 	defer c.deleteCentralArtifact(owner, repo, baseArtifact.ID)
+	if opts.TestFlight {
+		if trustedArtifact, findErr := c.github.FindArtifactByName(ctx, owner, repo, run.ID, centralTrustedPrefix+buildID); findErr == nil {
+			defer c.deleteCentralArtifact(owner, repo, trustedArtifact.ID)
+		}
+	}
 	artifact := baseArtifact
 	if opts.TestFlight {
 		deployName := centralDeployPrefix + buildID
@@ -257,43 +264,17 @@ func centralIdentity(cfg *config.Config) (*age.X25519Identity, error) {
 	return identity, nil
 }
 
-func centralDispatchInputs(cfg *config.Config, buildID, ref string, testFlight bool) map[string]string {
+func centralDispatchInputs(cfg *config.Config, buildID string, testFlight bool) map[string]string {
 	inputs := map[string]string{
 		"build_id":           buildID,
-		"source_owner":       cfg.GitHub.Owner,
-		"source_repo":        cfg.GitHub.Repo,
-		"snapshot_ref":       ref,
-		"ios_path":           ".",
-		"framework_hint":     frameworkHint(cfg),
+		"project_id":         cfg.ProjectID,
 		"artifact_recipient": strings.TrimSpace(cfg.Security.Recipient),
 		"operation":          "build",
 	}
-	if cfg.IOS.Path != "" {
-		inputs["ios_path"] = cfg.IOS.Path
-	}
-	if cfg.IOS.Scheme != "" {
-		inputs["scheme"] = cfg.IOS.Scheme
-	}
 	if testFlight {
 		inputs["operation"] = "testflight"
-		inputs["configuration"] = "Release"
-	} else if cfg.IOS.Configuration != "" {
-		inputs["configuration"] = cfg.IOS.Configuration
 	}
 	return inputs
-}
-
-func frameworkHint(cfg *config.Config) string {
-	switch {
-	case cfg.ReactNative.Expo:
-		return "expo"
-	case cfg.Flutter.Version != "":
-		return "flutter"
-	case cfg.KMP.JDKVersion != "":
-		return "kmp"
-	default:
-		return "auto"
-	}
 }
 
 func (c *Coordinator) downloadCentralArtifact(ctx context.Context, owner, repo string, artifact *github.Artifact) (*encryptedArtifact, error) {
@@ -358,6 +339,8 @@ func parseEncryptedArtifact(data []byte) (*encryptedArtifact, error) {
 				return nil, fmt.Errorf("duplicate %s in artifact ZIP", centralLogFile)
 			}
 			result.log, err = readBoundedZipFile(file, maxLogCiphertextSize)
+		case centralProjectFile:
+			_, err = readBoundedZipFile(file, maxIPACiphertextSize)
 		default:
 			return nil, fmt.Errorf("unexpected artifact ZIP member %q", file.Name)
 		}
@@ -580,7 +563,7 @@ func (c *Coordinator) cancelCentralRunByBuildID(owner, repo, workflow, buildID s
 
 func (c *Coordinator) deleteCentralBuildArtifacts(ctx context.Context, owner, repo string, runID int64, buildID string) {
 	if err := c.github.DeleteRunArtifactsByName(ctx, owner, repo, runID,
-		centralArtifactPrefix+buildID, centralDeployPrefix+buildID); err != nil {
+		centralArtifactPrefix+buildID, centralTrustedPrefix+buildID, centralDeployPrefix+buildID); err != nil {
 		c.progress.Warn(fmt.Sprintf("could not delete encrypted artifacts for workflow run %d: %v", runID, err))
 	}
 }

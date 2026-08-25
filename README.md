@@ -6,19 +6,22 @@ The central backend lets multiple private application repositories use one publi
 
 ```text
 private app working tree
-  -> temporary private refs/ios-builder/jobs/<uuid>
-  -> public builder workflow on macOS
+  -> temporary private refs/ios-builder/jobs/<private-namespace>/<uuid>
+  -> public dispatch with opaque project ID only
+  -> secret registry resolution + immediate metadata masks
   -> repository-scoped GitHub App checkout
   -> unsigned iOS build with private console redirection
   -> AGE-encrypted IPA + log artifact
   -> local download, decryption, IPA validation, and cleanup
 ```
 
-The optional TestFlight path adds a second, protected job. The build job encrypts
-the unsigned IPA to a transport recipient. After approval of the
-`apple-production` Environment, the signing job receives only that authenticated
-ciphertext—not the private checkout—then signs and uploads directly to App Store
-Connect. GitHub stores no signed IPA artifact.
+The optional TestFlight path adds two clean hosted-runner boundaries. The build
+job encrypts untrusted project output to an isolated packaging job. That job
+executes no project code, recreates the IPA under a trusted temporary root, and
+uses GitHub Sigstore to attest the exact ciphertext and provenance manifest.
+After approval of `apple-production`, the signing job verifies that attestation
+before any Apple credential is injected, then signs and uploads directly to App
+Store Connect. GitHub stores no signed IPA artifact.
 
 The original repository backend remains available for existing MobAI users and repository-local builds. Simulator sharing, MobAI integration, Flutter/React Native/KMP development commands, framework detection, working-tree snapshots, signing tools, and public Go wrappers are retained. See [the upstream relationship](docs/UPSTREAM.md).
 
@@ -29,15 +32,15 @@ The original repository backend remains available for existing MobAI users and r
 
 - Private source is pushed only to the private source repository, under a temporary non-branch ref.
 - The GitHub App has Metadata read and Contents read only and is installed on explicitly selected repositories.
-- Each job requests an installation token for exactly one source repository, checks out with `persist-credentials: false`, then revokes the token before project code runs.
+- The build job requests an installation token for exactly one registry-authorized source repository, checks out with `persist-credentials: false`, then revokes the token before project code runs.
 - Unsigned build remains the default; Apple credentials are available only to the manually protected `apple-production` job.
 - The signing job never checks out private source and never runs project scripts or dependencies.
 - Detailed dependency/compiler output is redirected to a private log from process start.
-- Build logs and locally downloaded IPAs are encrypted to the caller's local-only AGE identity. TestFlight intermediates use a distinct AGE identity held by the protected Environment.
-- The public artifact contains only `App.ipa.age` and `build.log.age`, is retained for one day, and is deleted early when local retrieval succeeds.
+- Build logs and locally downloaded IPAs are encrypted to the caller's local-only AGE identity. TestFlight uses distinct build-to-package and package-to-signing AGE identities.
+- Public artifacts contain exact allowlists of ciphertext/manifest files, are retained for one day, and are deleted early when the caller completes cleanup. No plaintext or signed IPA is uploaded.
 - Central mode creates no Actions caches and uploads no DerivedData, dSYM, archive, source, or plaintext diagnostics.
-- Inputs are validated before credential creation; build commands use fixed argv arrays, never `eval` or user-provided scripts.
-- Full UUIDv4 correlation binds the workflow run and artifact to one build.
+- The public schema contains only build ID, opaque project ID, operation, and public artifact recipient. Registry values are validated and masked before credential creation; build commands use fixed argv arrays, never `eval` or user-provided scripts.
+- Full UUIDv4 correlation plus authenticated project ID, operation, builder commit, and workflow ref bind the TestFlight artifact to one trusted packaging execution.
 
 These controls protect against accidental public disclosure; they do not sandbox intentionally malicious private project code or hide plaintext from GitHub's active runner. Read the full [threat model](docs/THREAT_MODEL.md).
 
@@ -128,7 +131,25 @@ source and sends only the public build ID and Actions approval URL. Notification
 failure is reported as a warning and never blocks or fails the protected
 deployment.
 
-Generate a dedicated AGE identity for transport between the two jobs. Put its
+Generate two dedicated AGE identities: one for the untrusted build-to-package
+transport and one for package-to-signing transport. Put the first public
+recipient in repository variable `PACKAGING_RECIPIENT` and its identity in
+repository secret `PACKAGING_AGE_IDENTITY`. Put the second public recipient in
+`APPLE_SIGNING_RECIPIENT` and its identity only in the protected Environment
+secret `APPLE_SIGNING_AGE_IDENTITY`. These identities must be distinct from one
+another and from every caller's local artifact identity.
+
+The isolated `trusted-package` job has no private checkout and executes no
+project code. It decrypts and validates project output, copies the `.app` into a
+fresh temporary root, creates the exact unsigned IPA, hashes plaintext and
+ciphertext, and emits `provenance.json`. GitHub's pinned `actions/attest` action
+then signs both ciphertext and manifest using a short-lived Sigstore certificate
+issued from that job's OIDC identity. No long-lived provenance signing key is
+required. The protected signing job verifies repository, workflow, commit, ref,
+hosted-runner origin, manifest fields, artifact allowlist, and both digests
+before its Apple-secret step can run.
+
+Put the Apple transport identity's
 public recipient in the repository variable `APPLE_SIGNING_RECIPIENT`; put the
 identity itself only in the Environment secret `APPLE_SIGNING_AGE_IDENTITY`.
 Never reuse the caller's local AGE identity and never commit the transport
@@ -221,6 +242,7 @@ From each authorized private application:
 ```bash
 cd /path/to/private-app
 builder central setup --builder YOUR_ACCOUNT/ios-cloud-builder
+builder central register
 builder central doctor
 ```
 
@@ -229,6 +251,8 @@ builder central doctor
 ```json
 {
   "project": "MyApp",
+  "project_id": "p_0123456789abcdef0123456789abcdef",
+  "snapshot_namespace": "11111111111111111111111111111111",
   "platform": "ios",
   "backend": "central",
   "github": { "owner": "SOURCE_OWNER", "repo": "PRIVATE_SOURCE_REPO" },
@@ -242,7 +266,20 @@ builder central doctor
 }
 ```
 
-Only the public AGE recipient is stored in this file. The private identity is kept in the OS keyring when usable or under the user's configuration directory with `0600` permissions. To initialize it explicitly:
+`central register` creates a random 128-bit opaque handle and a separate private
+128-bit snapshot namespace, updates the protected
+`PROJECT_REGISTRY` Actions secret, and keeps a mode-`0600` local registry backup
+so additional private projects can be added without manually editing secret
+JSON. Never commit that backup. GitHub cannot return secret plaintext, so retain
+the backup when managing multiple projects; losing it requires rebuilding and
+re-registering the complete mapping before replacing the secret.
+
+Only the public AGE recipient, opaque handle, and private snapshot namespace are
+stored in the private application's `builder.json`. The namespace never appears
+in public dispatch inputs and prevents the public build UUID from revealing the
+temporary Git ref.
+The private identity is kept in the OS keyring when usable or under the user's
+configuration directory with `0600` permissions. To initialize it explicitly:
 
 ```bash
 builder security init
@@ -338,11 +375,13 @@ builder update
 - public builder and private source API access
 - central workflow availability
 - `APP_CLIENT_ID` variable and `APP_PRIVATE_KEY` secret metadata
+- `PROJECT_REGISTRY` secret metadata
 - matching local AGE identity
 - explicit GitHub source remote
 - dry-run permission to push the temporary snapshot namespace
 
 With `--testflight`, doctor additionally verifies metadata for
+`PACKAGING_RECIPIENT`, `PACKAGING_AGE_IDENTITY`,
 `APPLE_SIGNING_RECIPIENT`, the `apple-production` Environment, `APPLE_TEAM_ID`,
 every required Environment secret, either `APPLE_PROVISIONING_PROFILES` or the
 legacy `APPLE_PROVISIONING_PROFILE`, a non-empty required-reviewer rule with
@@ -364,8 +403,9 @@ go build ./cmd/builder-runner
 ## Known limitations
 
 - A one-time GitHub App browser setup and private-repository selection cannot be completed safely by the CLI alone.
-- Repository/source names and workflow inputs are public metadata even though source contents and outputs are encrypted.
-- A malicious project or dependency runs as the runner user and is not strongly sandboxed.
+- The opaque project ID, random build ID, operation, and caller AGE public recipient are public workflow inputs. Private repository identity, private snapshot namespace and ref, iOS path, scheme, workspace/project name, and Bundle ID are not dispatch inputs; trusted code masks resolved values before GitHub-native actions use them.
+- When the private source and public builder share one GitHub account, that account name is unavoidably public as the builder repository owner. Use a separate public-builder account if the owner name itself must be hidden; the private repository name and full owner/repository pair remain protected.
+- A malicious project or dependency runs as the runner user and is not strongly sandboxed; it can intentionally leak or alter its own pre-boundary output. The clean packaging job prevents post-boundary substitution but does not prove that source/dependencies were benign.
 - The central hosted-runner design has the policy caveat described in [COMPLIANCE.md](COMPLIANCE.md).
 - Central TestFlight supports multiple top-level applications by exact Bundle ID, but still rejects embedded app extensions, Watch apps, App Clips, and XPC services that require nested-bundle signing and additional profiles.
 - Applications without `TESTFLIGHT_BETA_GROUPS` retain upload-only semantics: acceptance does not mean Apple's asynchronous processing or review has completed.

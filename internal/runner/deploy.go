@@ -44,12 +44,13 @@ var (
 // values are read from and immediately removed from the process environment.
 type TestFlightOptions struct {
 	EncryptedIPAPath string
+	ManifestPath     string
 	LogPath          string
 	BuildNumber      string
+	Expected         ProvenanceExpectation
 }
 
 type appleCredentials struct {
-	ageIdentity string
 	p12         string
 	p12Password string
 	profile     string
@@ -92,10 +93,14 @@ func ExecuteTestFlight(ctx context.Context, options *TestFlightOptions, recipien
 	if err != nil {
 		return fmt.Errorf("prepare private deployment log")
 	}
-	credentials, credentialErr := takeAppleCredentials()
-	deployErr := credentialErr
+	manifest, provenanceErr := ValidateProvenanceArtifact(filepath.Dir(options.EncryptedIPAPath), options.Expected)
+	identity, identityErr := takeTransportIdentity()
+	deployErr := provenanceErr
 	if deployErr == nil {
-		deployErr = deployTestFlight(ctx, options, credentials, logFile)
+		deployErr = identityErr
+	}
+	if deployErr == nil {
+		deployErr = deployTestFlight(ctx, options, manifest, identity, logFile)
 	}
 	if deployErr != nil {
 		_, _ = fmt.Fprintf(logFile, "\nDeployment failed: %v\n", deployErr)
@@ -115,7 +120,8 @@ func (options *TestFlightOptions) validate() error {
 	if options == nil || !filepath.IsAbs(options.EncryptedIPAPath) || !filepath.IsAbs(options.LogPath) {
 		return fmt.Errorf("deployment paths must be absolute")
 	}
-	if filepath.Base(options.EncryptedIPAPath) != "App.ipa.age" || filepath.Base(options.LogPath) != "build.log" {
+	if filepath.Base(options.EncryptedIPAPath) != trustedIPAFile || filepath.Base(options.ManifestPath) != provenanceFile || filepath.Base(options.LogPath) != "build.log" ||
+		filepath.Dir(options.EncryptedIPAPath) != filepath.Dir(options.ManifestPath) || options.Expected.validate() != nil {
 		return fmt.Errorf("invalid deployment paths")
 	}
 	if !buildPattern.MatchString(options.BuildNumber) {
@@ -132,7 +138,6 @@ func takeAppleCredentials() (*appleCredentials, error) {
 	}
 	take := func(name string) string { return strings.TrimSpace(takeRaw(name)) }
 	credentials := &appleCredentials{
-		ageIdentity: take("APPLE_SIGNING_AGE_IDENTITY"),
 		p12:         take("APPLE_DISTRIBUTION_P12"),
 		p12Password: takeRaw("APPLE_DISTRIBUTION_P12_PASSWORD"),
 		profile:     take("APPLE_PROVISIONING_PROFILE"),
@@ -143,7 +148,7 @@ func takeAppleCredentials() (*appleCredentials, error) {
 		issuerID:    take("ASC_ISSUER_ID"),
 		betaGroups:  take("TESTFLIGHT_BETA_GROUPS"),
 	}
-	if credentials.ageIdentity == "" || credentials.p12 == "" || credentials.p12Password == "" ||
+	if credentials.p12 == "" || credentials.p12Password == "" ||
 		(credentials.profile == "" && credentials.profiles == "") || credentials.teamID == "" || credentials.apiKey == "" ||
 		credentials.apiKeyID == "" {
 		return nil, fmt.Errorf("protected Apple environment is incomplete")
@@ -155,7 +160,17 @@ func takeAppleCredentials() (*appleCredentials, error) {
 	return credentials, nil
 }
 
-func deployTestFlight(ctx context.Context, options *TestFlightOptions, credentials *appleCredentials, privateLog io.Writer) error {
+func takeTransportIdentity() (age.Identity, error) {
+	value := strings.TrimSpace(os.Getenv("APPLE_SIGNING_AGE_IDENTITY"))
+	_ = os.Unsetenv("APPLE_SIGNING_AGE_IDENTITY")
+	identity, err := age.ParseX25519Identity(value)
+	if err != nil {
+		return nil, fmt.Errorf("parse signing transport identity")
+	}
+	return identity, nil
+}
+
+func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest *ProvenanceManifest, identity age.Identity, privateLog io.Writer) error {
 	workRoot, err := os.MkdirTemp(filepath.Dir(options.LogPath), ".testflight-")
 	if err != nil {
 		return fmt.Errorf("prepare deployment workspace")
@@ -172,13 +187,12 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, credentia
 	run := executor{ctx: ctx, env: ChildEnvironment(workRoot, signingHome), log: privateLog}
 	uploadRun := executor{ctx: ctx, env: ChildEnvironment(workRoot, privateHome), log: privateLog}
 
-	identity, err := age.ParseX25519Identity(credentials.ageIdentity)
-	if err != nil {
-		return fmt.Errorf("parse signing transport identity")
-	}
 	unsignedIPA := filepath.Join(workRoot, "unsigned.ipa")
 	if err := decryptFileBounded(identity, options.EncryptedIPAPath, unsignedIPA, maxDeployIPABytes); err != nil {
 		return err
+	}
+	if err := verifyPlaintextIPADigest(unsignedIPA, manifest); err != nil {
+		return fmt.Errorf("unsigned IPA does not match authenticated provenance")
 	}
 	payloadRoot := filepath.Join(workRoot, "unsigned")
 	appPath, err := extractUnsignedIPA(unsignedIPA, payloadRoot)
@@ -193,6 +207,10 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, credentia
 		return err
 	}
 	bundleID, marketingVersion, err := readAppMetadata(filepath.Join(appPath, "Info.plist"))
+	if err != nil {
+		return err
+	}
+	credentials, err := takeAppleCredentials()
 	if err != nil {
 		return err
 	}
@@ -311,7 +329,7 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, credentia
 		if err != nil {
 			return err
 		}
-		if err := publishToBetaGroup(ctx, publisher, betaPublishRequest{
+		if err := publishToBetaGroup(ctx, publisher, &betaPublishRequest{
 			BundleID:         bundleID,
 			MarketingVersion: marketingVersion,
 			BuildNumber:      options.BuildNumber,

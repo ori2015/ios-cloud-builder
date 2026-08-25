@@ -83,15 +83,17 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 		"path: builder", "path: source", "persist-credentials: false",
 		"Set up trusted Go toolchain", "go-version-file: builder/go.mod", "cache: false",
 		"submodules: false", "lfs: false",
-		"APP_CLIENT_ID", "APP_PRIVATE_KEY", "repositories: ${{ inputs.source_repo }}",
+		"APP_CLIENT_ID", "APP_PRIVATE_KEY", "PROJECT_REGISTRY", "project_id:",
+		"repositories: ${{ steps.project.outputs.source_repo }}",
 		"client-id: ${{ vars.APP_CLIENT_ID }}",
 		"skip-token-revoke: true", "permission-contents: read",
 		"if: always() && steps.source-token.outcome == 'success'",
 		"Restore bounded large-file snapshot chunks", "restore-snapshot --source",
 		"CODE_SIGNING_ALLOWED: 'NO'", "retention-days: 1",
-		"name: ios-builder-${{ inputs.build_id }}", "encrypted/build.log.age", "encrypted/App.ipa.age",
+		"name: ios-builder-${{ inputs.build_id }}", "encrypted/build.log.age", "encrypted/App.ipa.age", "encrypted/project-output.age",
 		"go mod verify",
-		"operation:", "environment: apple-production", "APPLE_SIGNING_RECIPIENT",
+		"operation:", "environment: apple-production", "PACKAGING_RECIPIENT", "PACKAGING_AGE_IDENTITY", "APPLE_SIGNING_RECIPIENT",
+		"actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26", "verify-provenance", "provenance.json",
 		"APPLE_SIGNING_AGE_IDENTITY", "APPLE_DISTRIBUTION_P12", "APPLE_PROVISIONING_PROFILE", "APPLE_PROVISIONING_PROFILES",
 		"ASC_API_KEY_P8", "deploy-testflight", "--build-number", "github.run_number", "github.run_attempt", "ios-builder-deploy-${{ inputs.build_id }}",
 		"TESTFLIGHT_BETA_GROUPS: ${{ vars.TESTFLIGHT_BETA_GROUPS }}",
@@ -115,6 +117,34 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 		if strings.Contains(deployJob, forbidden) {
 			t.Errorf("protected deployment job contains forbidden text %q", forbidden)
 		}
+	}
+	signMarker := "      - name: Sign and upload directly to App Store Connect"
+	signIndex := strings.Index(deployJob, signMarker)
+	provenanceIndex := strings.Index(deployJob, "      - name: Verify provenance before loading Apple credentials")
+	if provenanceIndex < 0 || signIndex < 0 || provenanceIndex >= signIndex {
+		t.Fatal("provenance verification does not precede the Apple-secret step")
+	}
+	beforeAppleStep := deployJob[:signIndex]
+	for _, forbidden := range []string{
+		"secrets.APPLE_SIGNING_AGE_IDENTITY", "secrets.APPLE_DISTRIBUTION_P12",
+		"secrets.APPLE_PROVISIONING_PROFILE", "secrets.APPLE_PROVISIONING_PROFILES",
+		"secrets.ASC_API_KEY_P8", "secrets.ASC_KEY_ID", "secrets.ASC_ISSUER_ID",
+	} {
+		if strings.Contains(beforeAppleStep, forbidden) {
+			t.Errorf("Apple secret %q is available before provenance verification", forbidden)
+		}
+	}
+	packageMarker := "  trusted-package:"
+	packageIndex := strings.Index(text, packageMarker)
+	if packageIndex < 0 || packageIndex >= deployIndex {
+		t.Fatal("isolated trusted packaging job is missing")
+	}
+	packageJob := text[packageIndex:deployIndex]
+	if strings.Contains(packageJob, "path: source") || strings.Contains(packageJob, "APP_PRIVATE_KEY") {
+		t.Fatal("trusted packaging job can access private source credentials or checkout")
+	}
+	if strings.Count(text, "id-token: write") != 1 || strings.Count(text, "attestations: write") != 1 {
+		t.Fatal("attestation permissions are not isolated to one job")
 	}
 	telegramToken := regexp.MustCompile(`\b[0-9]{6,}:[A-Za-z0-9_-]{20,}\b`)
 	if telegramToken.MatchString(text) {
@@ -143,7 +173,7 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 	ordered := []string{
 		"Set up trusted Go toolchain",
 		"Build trusted runner before private checkout",
-		"Validate all dispatch inputs before credential creation",
+		"Resolve opaque project and mask private metadata",
 		"Create repository-scoped GitHub App token",
 		"Checkout exactly the authorized private snapshot",
 		"Revoke private repository token before project code",
@@ -160,5 +190,15 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 			t.Fatalf("workflow boundary %q is missing or out of order", marker)
 		}
 		last = index
+	}
+	permissionsIndex := strings.Index(text, "permissions:")
+	if permissionsIndex < 0 {
+		t.Fatal("workflow has no permissions boundary")
+	}
+	dispatchSchema := text[:permissionsIndex]
+	for _, forbidden := range []string{"source_owner:", "source_repo:", "snapshot_ref:", "ios_path:", "scheme:", "configuration:", "framework_hint:"} {
+		if strings.Contains(dispatchSchema, forbidden) {
+			t.Errorf("workflow dispatch still exposes private metadata input %q", forbidden)
+		}
 	}
 }

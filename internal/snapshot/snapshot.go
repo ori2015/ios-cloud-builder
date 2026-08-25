@@ -18,7 +18,10 @@ import (
 // refs/heads and refs/tags do not appear as branches and fire no push events.
 const refPrefix = "refs/ios-builder/jobs/"
 
-var snapshotIDPattern = regexp.MustCompile(`^(?:[0-9a-f]{8}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$`)
+var (
+	snapshotIDPattern        = regexp.MustCompile(`^(?:[0-9a-f]{8}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$`)
+	snapshotNamespacePattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+)
 
 // DefaultMaxAge is the age after which a snapshot is considered abandoned.
 const DefaultMaxAge = 24 * time.Hour
@@ -33,6 +36,12 @@ type RemoteRef struct {
 // Ref returns the remote ref that holds the snapshot for a build.
 func Ref(buildID string) string {
 	return refPrefix + buildID
+}
+
+// RefForNamespace hides the real private ref behind a per-project random
+// namespace shared only by private local config and the protected registry.
+func RefForNamespace(namespace, buildID string) string {
+	return refPrefix + namespace + "/" + buildID
 }
 
 // VerifyRemote checks that the selected push remote names the configured
@@ -149,8 +158,8 @@ func ListStale(ctx context.Context, remote string, maxAge time.Duration, now tim
 			continue
 		}
 		sha, ref := fields[0], fields[1]
-		buildID := strings.TrimPrefix(ref, refPrefix)
-		if !snapshotIDPattern.MatchString(buildID) {
+		buildID, ok := snapshotBuildID(ref)
+		if !ok {
 			continue
 		}
 		if _, err := git(ctx, "", "cat-file", "-e", sha+"^{commit}"); err != nil {
@@ -179,6 +188,19 @@ func ListStale(ctx context.Context, remote string, maxAge time.Duration, now tim
 		}
 	}
 	return stale, nil
+}
+
+func snapshotBuildID(ref string) (string, bool) {
+	relative := strings.TrimPrefix(ref, refPrefix)
+	parts := strings.Split(relative, "/")
+	switch {
+	case len(parts) == 1 && snapshotIDPattern.MatchString(parts[0]):
+		return parts[0], true
+	case len(parts) == 2 && snapshotNamespacePattern.MatchString(parts[0]) && snapshotIDPattern.MatchString(parts[1]):
+		return parts[1], true
+	default:
+		return "", false
+	}
 }
 
 // Cleanup deletes stale snapshot refs and returns the refs successfully

@@ -115,7 +115,7 @@ func TestPublishToBetaGroupWaitsAttachesAndSubmits(t *testing.T) {
 	client, _ := testASCClient(t, server.Client())
 	client.baseURL = server.URL
 	var privateLog bytes.Buffer
-	err := publishToBetaGroup(context.Background(), client, betaPublishRequest{
+	err := publishToBetaGroup(context.Background(), client, &betaPublishRequest{
 		BundleID: "com.example.app", MarketingVersion: "0.1.0", BuildNumber: "16.1",
 		Group: betaGroupConfig{GroupID: testGroupID, PublicLinkID: "abcd1234", SubmitBetaReview: true},
 	}, &privateLog)

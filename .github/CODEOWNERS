@@ -1,7 +1,10 @@
 # Security-sensitive central build control plane.
 /.github/workflows/ios-build.yml @ori2015
 /cmd/builder-runner/ @ori2015
+/cmd/builder/central.go @ori2015
 /internal/runner/ @ori2015
+/internal/registry/ @ori2015
+/internal/config/types.go @ori2015
 /internal/security/ @ori2015
 /internal/build/central.go @ori2015
 /docs/THREAT_MODEL.md @ori2015

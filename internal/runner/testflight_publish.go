@@ -211,12 +211,15 @@ func appStoreConnectHTTPError(status int, contents []byte) error {
 		}
 	}
 	if len(details) == 0 {
-		return fmt.Errorf("App Store Connect request failed with HTTP %d", status)
+		return fmt.Errorf("request to App Store Connect failed with HTTP %d", status)
 	}
-	return fmt.Errorf("App Store Connect request failed with HTTP %d: %s", status, strings.Join(details, " | "))
+	return fmt.Errorf("request to App Store Connect failed with HTTP %d: %s", status, strings.Join(details, " | "))
 }
 
-func publishToBetaGroup(ctx context.Context, api *appStoreConnectClient, request betaPublishRequest, privateLog io.Writer) error {
+func publishToBetaGroup(ctx context.Context, api *appStoreConnectClient, request *betaPublishRequest, privateLog io.Writer) error {
+	if request == nil {
+		return fmt.Errorf("invalid TestFlight publishing metadata")
+	}
 	if !bundleIDPattern.MatchString(request.BundleID) || !marketingPattern.MatchString(request.MarketingVersion) ||
 		!buildPattern.MatchString(request.BuildNumber) {
 		return fmt.Errorf("invalid TestFlight publishing metadata")
@@ -304,7 +307,7 @@ func findASCApp(ctx context.Context, api *appStoreConnectClient, bundleID string
 			return app.ID, nil
 		}
 	}
-	return "", fmt.Errorf("App Store Connect has no exact app for the uploaded bundle identifier")
+	return "", fmt.Errorf("no exact App Store Connect app exists for the uploaded bundle identifier")
 }
 
 func findASCBetaGroup(ctx context.Context, api *appStoreConnectClient, appID string, configured betaGroupConfig) (ascBetaGroup, error) {
@@ -364,7 +367,7 @@ func waitForASCBuild(ctx context.Context, api *appStoreConnectClient, appID, ver
 				_, _ = fmt.Fprintln(privateLog, "App Store Connect finished processing the exact uploaded build.")
 				return build, nil
 			case "INVALID", "FAILED":
-				return ascBuild{}, fmt.Errorf("App Store Connect processed the uploaded build as %s", build.ProcessingState)
+				return ascBuild{}, fmt.Errorf("uploaded build was processed by App Store Connect as %s", build.ProcessingState)
 			}
 		}
 		remaining := time.Until(deadline)
@@ -395,7 +398,7 @@ func findASCBuild(ctx context.Context, api *appStoreConnectClient, appID, versio
 		return ascBuild{}, false, nil
 	}
 	if len(response.Data) != 1 {
-		return ascBuild{}, false, fmt.Errorf("App Store Connect returned multiple builds for the exact version and build number")
+		return ascBuild{}, false, fmt.Errorf("multiple App Store Connect builds matched the exact version and build number")
 	}
 	var attributes struct {
 		ProcessingState         string `json:"processingState"`

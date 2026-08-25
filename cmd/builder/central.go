@@ -12,6 +12,7 @@ import (
 	"github.com/MobAI-App/ios-builder/internal/auth"
 	"github.com/MobAI-App/ios-builder/internal/config"
 	"github.com/MobAI-App/ios-builder/internal/github"
+	"github.com/MobAI-App/ios-builder/internal/registry"
 	"github.com/MobAI-App/ios-builder/internal/security"
 	"github.com/MobAI-App/ios-builder/internal/snapshot"
 	"github.com/spf13/cobra"
@@ -34,15 +35,24 @@ var centralDoctorCmd = &cobra.Command{
 	RunE:  runCentralDoctor,
 }
 
+var centralRegisterCmd = &cobra.Command{
+	Use:   "register",
+	Short: "Register this private project under an opaque ID",
+	RunE:  runCentralRegister,
+}
+
 func init() {
 	rootCmd.AddCommand(centralCmd)
-	centralCmd.AddCommand(centralSetupCmd, centralDoctorCmd)
+	centralCmd.AddCommand(centralSetupCmd, centralRegisterCmd, centralDoctorCmd)
 	centralSetupCmd.Flags().String("builder", "", "Public builder repository as OWNER/REPO (required)")
 	centralSetupCmd.Flags().StringP("remote", "r", "origin", "Private source git remote")
 	centralSetupCmd.Flags().StringP("project", "p", "", "Project name (defaults to directory name)")
 	centralSetupCmd.Flags().String("ios-path", "", "Relative path to the iOS project (auto-detected)")
 	centralSetupCmd.Flags().String("scheme", "", "Xcode scheme (auto-detected when empty)")
 	centralSetupCmd.Flags().String("configuration", "Debug", "Build configuration: Debug or Release")
+	centralSetupCmd.Flags().String("project-id", "", "Existing opaque project ID (normally generated automatically)")
+	centralSetupCmd.Flags().String("snapshot-namespace", "", "Existing private snapshot namespace (normally generated automatically)")
+	centralRegisterCmd.Flags().String("registry-file", "", "Mode-0600 local registry backup path")
 	centralDoctorCmd.Flags().StringP("remote", "r", "origin", "Private source git remote")
 	centralDoctorCmd.Flags().Bool("testflight", false, "Also verify apple-production metadata without reading secret values")
 }
@@ -77,15 +87,31 @@ func runCentralSetup(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("initialize local AGE identity: %w", err)
 	}
 
+	projectID, _ := cmd.Flags().GetString("project-id")
+	if projectID == "" {
+		projectID, err = registry.NewProjectID()
+		if err != nil {
+			return err
+		}
+	}
+	snapshotNamespace, _ := cmd.Flags().GetString("snapshot-namespace")
+	if snapshotNamespace == "" {
+		snapshotNamespace, err = registry.NewSnapshotNamespace()
+		if err != nil {
+			return err
+		}
+	}
 	cfg := &config.Config{
-		Project:     project,
-		Platform:    "ios",
-		Backend:     config.BackendCentral,
-		GitHub:      config.GitHubConfig{Owner: sourceOwner, Repo: sourceRepo},
-		Builder:     config.BuilderConfig{Owner: parts[0], Repo: parts[1], Workflow: config.DefaultWorkflow},
-		Security:    config.SecurityConfig{Recipient: recipient},
-		IOS:         config.IOSConfig{Path: iosPath, Scheme: scheme, Configuration: configuration},
-		ReactNative: config.ReactNativeConfig{Expo: isExpoProject()},
+		Project:           project,
+		ProjectID:         projectID,
+		SnapshotNamespace: snapshotNamespace,
+		Platform:          "ios",
+		Backend:           config.BackendCentral,
+		GitHub:            config.GitHubConfig{Owner: sourceOwner, Repo: sourceRepo},
+		Builder:           config.BuilderConfig{Owner: parts[0], Repo: parts[1], Workflow: config.DefaultWorkflow},
+		Security:          config.SecurityConfig{Recipient: recipient},
+		IOS:               config.IOSConfig{Path: iosPath, Scheme: scheme, Configuration: configuration},
+		ReactNative:       config.ReactNativeConfig{Expo: isExpoProject()},
 	}
 	if isFlutterProject() {
 		cfg.Flutter.Version = getLocalFlutterVersion()
@@ -103,8 +129,122 @@ func runCentralSetup(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("Configured %s/%s to build through %s/%s.\n", sourceOwner, sourceRepo, parts[0], parts[1])
 	fmt.Println("No workflow or private source was written to the public builder.")
 	printGitHubAppSetup(parts[0], parts[1])
-	fmt.Println("After the one-time GitHub App setup, run: builder central doctor")
+	fmt.Printf("Opaque project ID: %s\n", projectID)
+	fmt.Println("After the one-time GitHub App setup, run: builder central register")
 	return nil
+}
+
+func runCentralRegister(cmd *cobra.Command, _ []string) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	if !cfg.IsCentral() {
+		return errors.New("builder.json uses the repository backend")
+	}
+	if cfg.ProjectID == "" {
+		cfg.ProjectID, err = registry.NewProjectID()
+		if err != nil {
+			return err
+		}
+	}
+	if cfg.SnapshotNamespace == "" {
+		cfg.SnapshotNamespace, err = registry.NewSnapshotNamespace()
+		if err != nil {
+			return err
+		}
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	registryPath, _ := cmd.Flags().GetString("registry-file")
+	if registryPath == "" {
+		registryPath, err = defaultRegistryPath(cfg.Builder.Owner, cfg.Builder.Repo)
+		if err != nil {
+			return err
+		}
+	}
+	value, err := registry.LoadFile(registryPath)
+	if err != nil {
+		return fmt.Errorf("load local registry backup: %w", err)
+	}
+	iosPath := cfg.IOS.Path
+	if iosPath == "" {
+		iosPath = "."
+	}
+	configuration := cfg.IOS.Configuration
+	if configuration == "" {
+		configuration = "Debug"
+	}
+	token, _, err := auth.GetTokenWithSource()
+	if err != nil {
+		return err
+	}
+	client := github.NewClient(token)
+	sourceRepository, err := client.GetRepository(cmd.Context(), cfg.GitHub.Owner, cfg.GitHub.Repo)
+	if err != nil {
+		return fmt.Errorf("read private source repository metadata: %w", err)
+	}
+	canonical := strings.Split(sourceRepository.FullName, "/")
+	if !sourceRepository.Private || len(canonical) != 2 || canonical[0] == "" || canonical[1] == "" {
+		return errors.New("central registration requires a private GitHub source repository")
+	}
+	cfg.GitHub.Owner, cfg.GitHub.Repo = canonical[0], canonical[1]
+	project := registry.Project{
+		Owner: cfg.GitHub.Owner, Repo: cfg.GitHub.Repo, IOSPath: iosPath,
+		Scheme: cfg.IOS.Scheme, Configuration: configuration, FrameworkHint: centralFrameworkHint(cfg),
+		SnapshotNamespace: cfg.SnapshotNamespace,
+	}
+	if err := value.Put(cfg.ProjectID, &project); err != nil {
+		return err
+	}
+	plaintext, err := value.Marshal()
+	if err != nil {
+		return err
+	}
+	// Persist the only recoverable plaintext backup before replacing GitHub's
+	// write-only secret. A failed remote update can then be retried safely.
+	if err := registry.SaveFile(registryPath, plaintext); err != nil {
+		return fmt.Errorf("save local registry backup: %w", err)
+	}
+	if err := config.NewManager().Save(cfg); err != nil {
+		return fmt.Errorf("persist opaque project registration: %w", err)
+	}
+	publicKey, err := client.GetPublicKey(cmd.Context(), cfg.Builder.Owner, cfg.Builder.Repo)
+	if err != nil {
+		return fmt.Errorf("read builder secret encryption key: %w", err)
+	}
+	ciphertext, err := github.EncryptSecret(publicKey.Key, string(plaintext))
+	if err != nil {
+		return err
+	}
+	if err := client.CreateOrUpdateSecret(cmd.Context(), cfg.Builder.Owner, cfg.Builder.Repo, registry.SecretName, ciphertext, publicKey.KeyID); err != nil {
+		return fmt.Errorf("update protected project registry: %w", err)
+	}
+	fmt.Printf("Registered opaque project %s in %s/%s (registry revision %d).\n", cfg.ProjectID, cfg.Builder.Owner, cfg.Builder.Repo, value.Revision)
+	fmt.Printf("Local registry backup: %s (mode 0600; never commit it)\n", registryPath)
+	return nil
+}
+
+func defaultRegistryPath(owner, repo string) (string, error) {
+	root, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "ios-builder", "registries", owner+"-"+repo+".json"), nil
+}
+
+func centralFrameworkHint(cfg *config.Config) string {
+	switch {
+	case cfg.ReactNative.Expo:
+		return "expo"
+	case cfg.Flutter.Version != "":
+		return "flutter"
+	case cfg.KMP.JDKVersion != "":
+		return "kmp"
+	default:
+		return "auto"
+	}
 }
 
 func printGitHubAppSetup(owner, repo string) {
@@ -186,11 +326,15 @@ func runCentralDoctor(cmd *cobra.Command, _ []string) error {
 			_, err := client.GetActionSecret(ctx, cfg.Builder.Owner, cfg.Builder.Repo, "APP_PRIVATE_KEY")
 			return err
 		}},
+		{"PROJECT_REGISTRY secret metadata", func(ctx context.Context) error {
+			_, err := client.GetActionSecret(ctx, cfg.Builder.Owner, cfg.Builder.Repo, registry.SecretName)
+			return err
+		}},
 		{"source git remote", func(ctx context.Context) error {
 			return snapshot.VerifyRemote(ctx, remote, cfg.GitHub.Owner, cfg.GitHub.Repo)
 		}},
 		{"snapshot push permission (dry run)", func(ctx context.Context) error {
-			ref := snapshot.Ref("00000000-0000-4000-8000-000000000000")
+			ref := snapshot.RefForNamespace(cfg.SnapshotNamespace, "00000000-0000-4000-8000-000000000000")
 			process := exec.CommandContext(ctx, "git", "push", "--dry-run", remote, "HEAD:"+ref)
 			process.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 			if out, err := process.CombinedOutput(); err != nil {
@@ -207,6 +351,14 @@ func runCentralDoctor(cmd *cobra.Command, _ []string) error {
 	testFlight, _ := cmd.Flags().GetBool("testflight")
 	if testFlight {
 		checks = append(checks,
+			check{"PACKAGING_RECIPIENT variable", func(ctx context.Context) error {
+				_, err := client.GetActionVariable(ctx, cfg.Builder.Owner, cfg.Builder.Repo, "PACKAGING_RECIPIENT")
+				return err
+			}},
+			check{"PACKAGING_AGE_IDENTITY secret metadata", func(ctx context.Context) error {
+				_, err := client.GetActionSecret(ctx, cfg.Builder.Owner, cfg.Builder.Repo, "PACKAGING_AGE_IDENTITY")
+				return err
+			}},
 			check{"APPLE_SIGNING_RECIPIENT variable", func(ctx context.Context) error {
 				_, err := client.GetActionVariable(ctx, cfg.Builder.Owner, cfg.Builder.Repo, "APPLE_SIGNING_RECIPIENT")
 				return err

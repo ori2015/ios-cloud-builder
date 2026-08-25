@@ -8,50 +8,10 @@ on:
         description: Unique full build UUID
         required: true
         type: string
-      source_owner:
-        description: Owner of the authorized private source repository
+      project_id:
+        description: Opaque registered project handle
         required: true
         type: string
-      source_repo:
-        description: Name of the authorized private source repository
-        required: true
-        type: string
-      snapshot_ref:
-        description: Temporary refs/ios-builder/jobs UUID snapshot
-        required: true
-        type: string
-      ios_path:
-        description: Relative iOS project directory
-        required: false
-        default: .
-        type: string
-      scheme:
-        description: Shared Xcode scheme, or empty for detection
-        required: false
-        default: ''
-        type: string
-      configuration:
-        description: Unsigned build configuration
-        required: false
-        default: Release
-        type: choice
-        options:
-          - Release
-          - Debug
-      framework_hint:
-        description: Framework hint, or auto for detection
-        required: false
-        default: auto
-        type: choice
-        options:
-          - auto
-          - native
-          - flutter
-          - react-native
-          - expo
-          - kmp
-          - cordova
-          - ionic
       artifact_recipient:
         description: AGE X25519 public recipient for this build
         required: true
@@ -94,30 +54,22 @@ jobs:
           go mod verify
           go build -trimpath -o "$RUNNER_TEMP/builder-runner" ./cmd/builder-runner
 
-      - name: Validate all dispatch inputs before credential creation
+      - name: Resolve opaque project and mask private metadata
+        id: project
         env:
           BUILD_ID: ${{ inputs.build_id }}
-          SOURCE_OWNER: ${{ inputs.source_owner }}
-          SOURCE_REPO: ${{ inputs.source_repo }}
-          SNAPSHOT_REF: ${{ inputs.snapshot_ref }}
-          IOS_PATH: ${{ inputs.ios_path }}
-          SCHEME: ${{ inputs.scheme }}
-          CONFIGURATION: ${{ inputs.configuration }}
-          FRAMEWORK_HINT: ${{ inputs.framework_hint }}
+          PROJECT_ID: ${{ inputs.project_id }}
           ARTIFACT_RECIPIENT: ${{ inputs.artifact_recipient }}
           OPERATION: ${{ inputs.operation }}
+          PROJECT_REGISTRY: ${{ secrets.PROJECT_REGISTRY }}
         run: |
-          "$RUNNER_TEMP/builder-runner" validate-inputs \
+          "$RUNNER_TEMP/builder-runner" resolve-project \
             --build-id "$BUILD_ID" \
-            --source-owner "$SOURCE_OWNER" \
-            --source-repo "$SOURCE_REPO" \
-            --snapshot-ref "$SNAPSHOT_REF" \
-            --ios-path "$IOS_PATH" \
-            --scheme "$SCHEME" \
-            --configuration "$CONFIGURATION" \
-            --framework-hint "$FRAMEWORK_HINT" \
+            --project-id "$PROJECT_ID" \
             --artifact-recipient "$ARTIFACT_RECIPIENT" \
-            --operation "$OPERATION"
+            --operation "$OPERATION" \
+            --registry "$PROJECT_REGISTRY" \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Create repository-scoped GitHub App token
         id: source-token
@@ -125,16 +77,16 @@ jobs:
         with:
           client-id: ${{ vars.APP_CLIENT_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ inputs.source_owner }}
-          repositories: ${{ inputs.source_repo }}
+          owner: ${{ steps.project.outputs.source_owner }}
+          repositories: ${{ steps.project.outputs.source_repo }}
           permission-contents: read
           skip-token-revoke: true
 
       - name: Checkout exactly the authorized private snapshot
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          repository: ${{ inputs.source_owner }}/${{ inputs.source_repo }}
-          ref: ${{ inputs.snapshot_ref }}
+          repository: ${{ steps.project.outputs.source_owner }}/${{ steps.project.outputs.source_repo }}
+          ref: ${{ steps.project.outputs.snapshot_ref }}
           token: ${{ steps.source-token.outputs.token }}
           path: source
           persist-credentials: false
@@ -161,7 +113,7 @@ jobs:
       - name: Detect supported iOS framework
         id: detect
         env:
-          FRAMEWORK_HINT: ${{ inputs.framework_hint }}
+          FRAMEWORK_HINT: ${{ steps.project.outputs.framework_hint }}
         run: |
           echo "Preparing framework toolchain"
           "$RUNNER_TEMP/builder-runner" detect \
@@ -192,15 +144,18 @@ jobs:
         id: secure-build
         continue-on-error: true
         env:
-          IOS_PATH: ${{ inputs.ios_path }}
-          SCHEME: ${{ inputs.scheme }}
-          CONFIGURATION: ${{ inputs.configuration }}
+          IOS_PATH: ${{ steps.project.outputs.ios_path }}
+          SCHEME: ${{ steps.project.outputs.scheme }}
+          CONFIGURATION: ${{ steps.project.outputs.configuration }}
           FRAMEWORK: ${{ steps.detect.outputs.framework }}
           ARTIFACT_RECIPIENT: ${{ inputs.artifact_recipient }}
-          IPA_RECIPIENT: ${{ inputs.operation == 'testflight' && vars.APPLE_SIGNING_RECIPIENT || inputs.artifact_recipient }}
+          IPA_RECIPIENT: ${{ inputs.operation == 'testflight' && vars.PACKAGING_RECIPIENT || inputs.artifact_recipient }}
+          OPERATION: ${{ inputs.operation }}
           CODE_SIGNING_ALLOWED: 'NO'
           CODE_SIGNING_REQUIRED: 'NO'
         run: |
+          intermediate=()
+          if [ "$OPERATION" = "testflight" ]; then intermediate=(--project-intermediate); fi
           "$RUNNER_TEMP/builder-runner" execute \
             --source "$GITHUB_WORKSPACE/source" \
             --ios-path "$IOS_PATH" \
@@ -211,7 +166,8 @@ jobs:
             --ipa "$RUNNER_TEMP/private-output/App.ipa" \
             --recipient "$ARTIFACT_RECIPIENT" \
             --ipa-recipient "$IPA_RECIPIENT" \
-            --output "$RUNNER_TEMP/encrypted"
+            --output "$RUNNER_TEMP/encrypted" \
+            "${intermediate[@]}"
 
       - name: Upload ciphertext only
         id: upload
@@ -222,6 +178,7 @@ jobs:
           path: |
             ${{ runner.temp }}/encrypted/build.log.age
             ${{ runner.temp }}/encrypted/App.ipa.age
+            ${{ runner.temp }}/encrypted/project-output.age
           if-no-files-found: error
           retention-days: 1
           include-hidden-files: false
@@ -243,10 +200,126 @@ jobs:
           fi
           echo "Build succeeded. Encrypted artifacts uploaded."
 
+  trusted-package:
+    if: inputs.operation == 'testflight'
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Checkout trusted public builder only
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          path: builder
+          persist-credentials: false
+
+      - name: Set up trusted Go toolchain
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: builder/go.mod
+          cache: false
+
+      - name: Build isolated trusted packaging runner
+        working-directory: builder
+        run: |
+          go mod verify
+          go build -trimpath -o "$RUNNER_TEMP/builder-runner" ./cmd/builder-runner
+
+      - name: Download encrypted project output
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ios-builder-${{ inputs.build_id }}
+          path: ${{ runner.temp }}/project-intermediate
+
+      - name: Create trusted TestFlight intermediate
+        id: package
+        continue-on-error: true
+        env:
+          PACKAGING_AGE_IDENTITY: ${{ secrets.PACKAGING_AGE_IDENTITY }}
+          APPLE_SIGNING_RECIPIENT: ${{ vars.APPLE_SIGNING_RECIPIENT }}
+        run: |
+          "$RUNNER_TEMP/builder-runner" trusted-package \
+            --input "$RUNNER_TEMP/project-intermediate" \
+            --output "$RUNNER_TEMP/trusted-output" \
+            --build-id "${{ inputs.build_id }}" \
+            --project-id "${{ inputs.project_id }}" \
+            --builder-commit "$GITHUB_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --recipient "$APPLE_SIGNING_RECIPIENT" \
+            --log "$RUNNER_TEMP/package-private/build.log"
+
+      - name: Cryptographically attest trusted output
+        id: attest
+        if: steps.package.outcome == 'success'
+        continue-on-error: true
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26
+        with:
+          subject-path: |
+            ${{ runner.temp }}/trusted-output/App.ipa.age
+            ${{ runner.temp }}/trusted-output/provenance.json
+          show-summary: false
+
+      - name: Upload authenticated intermediate only
+        id: trusted-upload
+        if: steps.package.outcome == 'success' && steps.attest.outcome == 'success'
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: ios-builder-trusted-${{ inputs.build_id }}
+          path: |
+            ${{ runner.temp }}/trusted-output/App.ipa.age
+            ${{ runner.temp }}/trusted-output/provenance.json
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: false
+          compression-level: 0
+
+      - name: Encrypt trusted-packaging failure diagnostic
+        if: steps.package.outcome != 'success' || steps.attest.outcome != 'success'
+        env:
+          ARTIFACT_RECIPIENT: ${{ inputs.artifact_recipient }}
+        run: |
+          if [ ! -f "$RUNNER_TEMP/package-private/build.log" ]; then
+            mkdir -p "$RUNNER_TEMP/package-private"
+            printf '%s\n' 'GitHub provenance attestation generation failed.' > "$RUNNER_TEMP/package-private/build.log"
+            chmod 600 "$RUNNER_TEMP/package-private/build.log"
+          fi
+          "$RUNNER_TEMP/builder-runner" encrypt-diagnostic \
+            --log "$RUNNER_TEMP/package-private/build.log" \
+            --recipient "$ARTIFACT_RECIPIENT" \
+            --output "$RUNNER_TEMP/package-diagnostic"
+
+      - name: Upload encrypted trusted-packaging diagnostic only
+        if: steps.package.outcome != 'success' || steps.attest.outcome != 'success'
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: ios-builder-deploy-${{ inputs.build_id }}
+          path: ${{ runner.temp }}/package-diagnostic/build.log.age
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: false
+          compression-level: 0
+
+      - name: Report trusted packaging status
+        if: always()
+        env:
+          PACKAGE_OUTCOME: ${{ steps.package.outcome }}
+          ATTEST_OUTCOME: ${{ steps.attest.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.trusted-upload.outcome }}
+        run: |
+          if [ "$PACKAGE_OUTCOME" != "success" ] || [ "$ATTEST_OUTCOME" != "success" ] || [ "$UPLOAD_OUTCOME" != "success" ]; then
+            echo "Trusted packaging failed. No private diagnostics were printed."
+            exit 1
+          fi
+          echo "Authenticated TestFlight intermediate uploaded."
+
   notify-approval:
     name: Notify that TestFlight approval is required
-    if: inputs.operation == 'testflight' && needs.build.result == 'success'
-    needs: build
+    if: inputs.operation == 'testflight' && needs.trusted-package.result == 'success'
+    needs: trusted-package
     runs-on: ubuntu-latest
     timeout-minutes: 2
 
@@ -280,7 +353,7 @@ jobs:
 
   sign-and-deploy:
     if: inputs.operation == 'testflight'
-    needs: build
+    needs: trusted-package
     environment: apple-production
     runs-on: macos-15
     timeout-minutes: 60
@@ -309,11 +382,29 @@ jobs:
       - name: Download authenticated unsigned intermediate
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: ios-builder-${{ inputs.build_id }}
+          name: ios-builder-trusted-${{ inputs.build_id }}
           path: ${{ runner.temp }}/intermediate
+
+      - name: Verify provenance before loading Apple credentials
+        id: provenance
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          "$RUNNER_TEMP/builder-runner" verify-provenance \
+            --input "$RUNNER_TEMP/intermediate" \
+            --build-id "${{ inputs.build_id }}" \
+            --project-id "${{ inputs.project_id }}" \
+            --builder-commit "$GITHUB_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --repository "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ios-build.yml" \
+            --source-ref "$GITHUB_REF" \
+            --log "$RUNNER_TEMP/provenance-private/build.log"
 
       - name: Sign and upload directly to App Store Connect
         id: deploy
+        if: steps.provenance.outcome == 'success'
         continue-on-error: true
         env:
           APPLE_SIGNING_AGE_IDENTITY: ${{ secrets.APPLE_SIGNING_AGE_IDENTITY }}
@@ -331,8 +422,23 @@ jobs:
         run: |
           "$RUNNER_TEMP/builder-runner" deploy-testflight \
             --encrypted-ipa "$RUNNER_TEMP/intermediate/App.ipa.age" \
+            --manifest "$RUNNER_TEMP/intermediate/provenance.json" \
+            --build-id "${{ inputs.build_id }}" \
+            --project-id "${{ inputs.project_id }}" \
+            --builder-commit "$GITHUB_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" \
             --log "$RUNNER_TEMP/deploy-private/build.log" \
             --build-number "$TESTFLIGHT_BUILD_NUMBER" \
+            --recipient "$ARTIFACT_RECIPIENT" \
+            --output "$RUNNER_TEMP/deploy-encrypted"
+
+      - name: Encrypt provenance rejection diagnostics
+        if: steps.provenance.outcome != 'success'
+        env:
+          ARTIFACT_RECIPIENT: ${{ inputs.artifact_recipient }}
+        run: |
+          "$RUNNER_TEMP/builder-runner" encrypt-diagnostic \
+            --log "$RUNNER_TEMP/provenance-private/build.log" \
             --recipient "$ARTIFACT_RECIPIENT" \
             --output "$RUNNER_TEMP/deploy-encrypted"
 
@@ -352,13 +458,14 @@ jobs:
         if: always()
         env:
           DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          PROVENANCE_OUTCOME: ${{ steps.provenance.outcome }}
           UPLOAD_OUTCOME: ${{ steps.deploy-upload.outcome }}
         run: |
           if [ "$UPLOAD_OUTCOME" != "success" ]; then
             echo "Encrypted deployment diagnostic upload failed."
             exit 1
           fi
-          if [ "$DEPLOY_OUTCOME" != "success" ]; then
+          if [ "$PROVENANCE_OUTCOME" != "success" ] || [ "$DEPLOY_OUTCOME" != "success" ]; then
             echo "TestFlight deployment failed. Download the encrypted diagnostic log using Builder CLI."
             exit 1
           fi

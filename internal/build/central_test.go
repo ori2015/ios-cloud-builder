@@ -20,24 +20,17 @@ import (
 
 func TestCentralDispatchInputs(t *testing.T) {
 	cfg := &config.Config{
-		GitHub:   config.GitHubConfig{Owner: "source-owner", Repo: "private-app"},
-		IOS:      config.IOSConfig{Path: "ios", Scheme: "App", Configuration: "Release"},
-		Flutter:  config.FlutterConfig{Version: "3.24.0"},
-		Security: config.SecurityConfig{Recipient: "age1example"},
+		ProjectID:         "p_0123456789abcdef0123456789abcdef",
+		SnapshotNamespace: "11111111111111111111111111111111",
+		Security:          config.SecurityConfig{Recipient: "age1example"},
 	}
 	want := map[string]string{
 		"build_id":           "0192f819-2c07-7c9d-a9ba-0242ac120002",
-		"source_owner":       "source-owner",
-		"source_repo":        "private-app",
-		"snapshot_ref":       "refs/ios-builder/jobs/0192f819-2c07-7c9d-a9ba-0242ac120002",
-		"ios_path":           "ios",
-		"scheme":             "App",
-		"configuration":      "Release",
-		"framework_hint":     "flutter",
+		"project_id":         "p_0123456789abcdef0123456789abcdef",
 		"artifact_recipient": "age1example",
 		"operation":          "build",
 	}
-	if got := centralDispatchInputs(cfg, want["build_id"], want["snapshot_ref"], false); !reflect.DeepEqual(got, want) {
+	if got := centralDispatchInputs(cfg, want["build_id"], false); !reflect.DeepEqual(got, want) {
 		t.Fatalf("centralDispatchInputs() = %#v, want %#v", got, want)
 	}
 }
@@ -111,25 +104,18 @@ func TestDecryptBoundedRejectsOversizePlaintext(t *testing.T) {
 	}
 }
 
-func TestCentralDispatchInputsUsesRepositoryRootForEmptyIOSPath(t *testing.T) {
-	cfg := &config.Config{GitHub: config.GitHubConfig{Owner: "o", Repo: "r"}}
-	if got := centralDispatchInputs(cfg, "id", "ref", false)["ios_path"]; got != "." {
-		t.Fatalf("ios_path = %q, want .", got)
-	}
-}
-
 func TestCentralDispatchInputsKeepRepositoriesIndependent(t *testing.T) {
 	first := &config.Config{
-		GitHub:   config.GitHubConfig{Owner: "team-a", Repo: "private-a"},
-		Security: config.SecurityConfig{Recipient: "age1recipient-a"},
+		ProjectID: "p_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Security:  config.SecurityConfig{Recipient: "age1recipient-a"},
 	}
 	second := &config.Config{
-		GitHub:   config.GitHubConfig{Owner: "team-b", Repo: "private-b"},
-		Security: config.SecurityConfig{Recipient: "age1recipient-b"},
+		ProjectID: "p_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Security:  config.SecurityConfig{Recipient: "age1recipient-b"},
 	}
-	a := centralDispatchInputs(first, "550e8400-e29b-41d4-a716-446655440000", "refs/ios-builder/jobs/a", false)
-	b := centralDispatchInputs(second, "6ba7b810-9dad-41d1-80b4-00c04fd430c8", "refs/ios-builder/jobs/b", false)
-	if a["source_owner"] == b["source_owner"] || a["source_repo"] == b["source_repo"] || a["build_id"] == b["build_id"] {
+	a := centralDispatchInputs(first, "550e8400-e29b-41d4-a716-446655440000", false)
+	b := centralDispatchInputs(second, "6ba7b810-9dad-41d1-80b4-00c04fd430c8", false)
+	if a["project_id"] == b["project_id"] || a["build_id"] == b["build_id"] {
 		t.Fatalf("central dispatches were not isolated: %#v %#v", a, b)
 	}
 	for _, payload := range []map[string]string{a, b} {
@@ -143,12 +129,11 @@ func TestCentralDispatchInputsKeepRepositoriesIndependent(t *testing.T) {
 
 func TestCentralTestFlightDispatchForcesRelease(t *testing.T) {
 	cfg := &config.Config{
-		GitHub:   config.GitHubConfig{Owner: "o", Repo: "r"},
-		IOS:      config.IOSConfig{Configuration: "Debug"},
-		Security: config.SecurityConfig{Recipient: "age1recipient"},
+		ProjectID: "p_0123456789abcdef0123456789abcdef",
+		Security:  config.SecurityConfig{Recipient: "age1recipient"},
 	}
-	got := centralDispatchInputs(cfg, "id", "ref", true)
-	if got["operation"] != "testflight" || got["configuration"] != "Release" {
+	got := centralDispatchInputs(cfg, "id", true)
+	if got["operation"] != "testflight" || len(got) != 4 {
 		t.Fatalf("TestFlight dispatch = %#v", got)
 	}
 }
@@ -216,11 +201,13 @@ func TestDownloadLogsRequiresCanonicalUUIDv4(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{
-		Project:  "App",
-		Backend:  config.BackendCentral,
-		GitHub:   config.GitHubConfig{Owner: "source", Repo: "private"},
-		Builder:  config.BuilderConfig{Owner: "builder", Repo: "public", Workflow: "ios-build.yml"},
-		Security: config.SecurityConfig{Recipient: identity.Recipient().String()},
+		Project:           "App",
+		ProjectID:         "p_0123456789abcdef0123456789abcdef",
+		SnapshotNamespace: "11111111111111111111111111111111",
+		Backend:           config.BackendCentral,
+		GitHub:            config.GitHubConfig{Owner: "source", Repo: "private"},
+		Builder:           config.BuilderConfig{Owner: "builder", Repo: "public", Workflow: "ios-build.yml"},
+		Security:          config.SecurityConfig{Recipient: identity.Recipient().String()},
 	}
 	coordinator := NewCoordinatorWithOutput(cfg, nil, io.Discard)
 	for _, buildID := range []string{

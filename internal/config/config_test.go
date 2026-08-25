@@ -176,12 +176,14 @@ func TestConfig_CentralDefaultsAndRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &Config{
-		Project:  "PrivateApp",
-		Platform: "ios",
-		Backend:  BackendCentral,
-		GitHub:   GitHubConfig{Owner: "source-owner", Repo: "private-app"},
-		Builder:  BuilderConfig{Owner: "builder-owner", Repo: "ios-cloud-builder"},
-		Security: SecurityConfig{Recipient: identity.Recipient().String()},
+		Project:           "PrivateApp",
+		ProjectID:         "p_0123456789abcdef0123456789abcdef",
+		SnapshotNamespace: "11111111111111111111111111111111",
+		Platform:          "ios",
+		Backend:           BackendCentral,
+		GitHub:            GitHubConfig{Owner: "source-owner", Repo: "private-app"},
+		Builder:           BuilderConfig{Owner: "builder-owner", Repo: "ios-cloud-builder"},
+		Security:          SecurityConfig{Recipient: identity.Recipient().String()},
 	}
 	if changed := cfg.ApplyDefaults(); !changed {
 		t.Fatal("ApplyDefaults() = false, want central workflow default")
@@ -225,12 +227,14 @@ func TestConfig_CentralValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	valid := Config{
-		Project:  "App",
-		Platform: "ios",
-		Backend:  BackendCentral,
-		GitHub:   GitHubConfig{Owner: "source", Repo: "private"},
-		Builder:  BuilderConfig{Owner: "builder", Repo: "public", Workflow: DefaultWorkflow},
-		Security: SecurityConfig{Recipient: identity.Recipient().String()},
+		Project:           "App",
+		ProjectID:         "p_0123456789abcdef0123456789abcdef",
+		SnapshotNamespace: "11111111111111111111111111111111",
+		Platform:          "ios",
+		Backend:           BackendCentral,
+		GitHub:            GitHubConfig{Owner: "source", Repo: "private"},
+		Builder:           BuilderConfig{Owner: "builder", Repo: "public", Workflow: DefaultWorkflow},
+		Security:          SecurityConfig{Recipient: identity.Recipient().String()},
 	}
 
 	tests := []struct {

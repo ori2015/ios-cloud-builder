@@ -119,7 +119,6 @@ func TestExtractUnsignedIPAFindsOneApplication(t *testing.T) {
 
 func TestTakeAppleCredentialsUnsetsEnvironment(t *testing.T) {
 	values := map[string]string{
-		"APPLE_SIGNING_AGE_IDENTITY":      "AGE-SECRET-KEY-TEST",
 		"APPLE_DISTRIBUTION_P12":          "cDEy",
 		"APPLE_DISTRIBUTION_P12_PASSWORD": " password ",
 		"APPLE_PROVISIONING_PROFILE":      "cHJvZmlsZQ==",
@@ -162,6 +161,21 @@ func TestTakeAppleCredentialsAcceptsProfileBundleWithoutLegacyProfile(t *testing
 	credentials, err := takeAppleCredentials()
 	if err != nil || credentials.profile != "" || credentials.profiles == "" {
 		t.Fatalf("takeAppleCredentials() = %#v, %v", credentials, err)
+	}
+}
+
+func TestTakeTransportIdentityUnsetsEnvironment(t *testing.T) {
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("APPLE_SIGNING_AGE_IDENTITY", identity.String())
+	got, err := takeTransportIdentity()
+	if err != nil || got == nil {
+		t.Fatalf("takeTransportIdentity() = %v, %v", got, err)
+	}
+	if os.Getenv("APPLE_SIGNING_AGE_IDENTITY") != "" {
+		t.Fatal("transport identity remained in environment")
 	}
 }
 
@@ -279,8 +293,13 @@ func TestExecuteTestFlightEncryptsCredentialFailure(t *testing.T) {
 	root := t.TempDir()
 	options := &TestFlightOptions{
 		EncryptedIPAPath: filepath.Join(root, "intermediate", "App.ipa.age"),
+		ManifestPath:     filepath.Join(root, "intermediate", "provenance.json"),
 		LogPath:          filepath.Join(root, "private-output", "build.log"),
 		BuildNumber:      "42.1",
+		Expected: ProvenanceExpectation{
+			BuildID: "123e4567-e89b-42d3-a456-426614174000", ProjectID: "p_0123456789abcdef0123456789abcdef",
+			BuilderCommit: strings.Repeat("a", 40), WorkflowRef: "owner/repo/.github/workflows/ios-build.yml@refs/heads/main",
+		},
 	}
 	output := filepath.Join(root, "encrypted")
 	err = ExecuteTestFlight(t.Context(), options, identity.Recipient().String(), output)
@@ -372,8 +391,11 @@ func TestTestFlightBuildNumberValidation(t *testing.T) {
 	for _, number := range []string{"", "0", "01", "1.", "1.a", "1.2.3.4"} {
 		options := &TestFlightOptions{
 			EncryptedIPAPath: filepath.Join(root, "intermediate", "App.ipa.age"),
+			ManifestPath:     filepath.Join(root, "intermediate", "provenance.json"),
 			LogPath:          filepath.Join(root, "private-output", "build.log"),
 			BuildNumber:      number,
+			Expected: ProvenanceExpectation{BuildID: "123e4567-e89b-42d3-a456-426614174000", ProjectID: "p_0123456789abcdef0123456789abcdef",
+				BuilderCommit: strings.Repeat("a", 40), WorkflowRef: "owner/repo/.github/workflows/ios-build.yml@refs/heads/main"},
 		}
 		if err := options.validate(); err == nil {
 			t.Fatalf("build number %q was accepted", number)
@@ -382,8 +404,11 @@ func TestTestFlightBuildNumberValidation(t *testing.T) {
 	for _, number := range []string{"1", "42.1", "9999.99.99"} {
 		options := &TestFlightOptions{
 			EncryptedIPAPath: filepath.Join(root, "intermediate", "App.ipa.age"),
+			ManifestPath:     filepath.Join(root, "intermediate", "provenance.json"),
 			LogPath:          filepath.Join(root, "private-output", "build.log"),
 			BuildNumber:      number,
+			Expected: ProvenanceExpectation{BuildID: "123e4567-e89b-42d3-a456-426614174000", ProjectID: "p_0123456789abcdef0123456789abcdef",
+				BuilderCommit: strings.Repeat("a", 40), WorkflowRef: "owner/repo/.github/workflows/ios-build.yml@refs/heads/main"},
 		}
 		if err := options.validate(); err != nil {
 			t.Fatalf("build number %q rejected: %v", number, err)
