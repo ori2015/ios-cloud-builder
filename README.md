@@ -258,9 +258,11 @@ builder ios deploy
 builder ios build --testflight
 ```
 
-The command may wait for approval of `apple-production`. On success, App Store
-Connect has accepted the upload for processing; TestFlight processing itself is
-asynchronous. No signed IPA is downloaded or retained as a GitHub artifact.
+The command may wait for approval of `apple-production`; its default three-hour
+timeout includes that approval window and can be changed with `--timeout`. On
+success, App Store Connect has accepted the upload for processing; TestFlight
+processing itself is asynchronous. No signed IPA is downloaded or retained as a
+GitHub artifact.
 The protected job replaces only `CFBundleVersion` with the unique GitHub Actions
 `run_number.run_attempt` value before signing; the application's
 `CFBundleShortVersionString` is preserved. It validates the signed IPA with App

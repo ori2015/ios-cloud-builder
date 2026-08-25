@@ -434,3 +434,27 @@ func (c *Client) DeleteArtifact(ctx context.Context, owner, repo string, artifac
 	}
 	return nil
 }
+
+// DeleteRunArtifactsByName removes only exact artifact names from one exact
+// workflow run. It is used by cancellation cleanup so concurrent builds and
+// unrelated artifacts cannot be affected.
+func (c *Client) DeleteRunArtifactsByName(ctx context.Context, owner, repo string, runID int64, names ...string) error {
+	artifacts, err := c.ListRunArtifacts(ctx, owner, repo, runID)
+	if err != nil {
+		return err
+	}
+	wanted := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		wanted[name] = struct{}{}
+	}
+	var deleteErrors []error
+	for _, artifact := range artifacts {
+		if _, ok := wanted[artifact.Name]; !ok {
+			continue
+		}
+		if err := c.DeleteArtifact(ctx, owner, repo, artifact.ID); err != nil {
+			deleteErrors = append(deleteErrors, fmt.Errorf("delete artifact %d: %w", artifact.ID, err))
+		}
+	}
+	return errors.Join(deleteErrors...)
+}

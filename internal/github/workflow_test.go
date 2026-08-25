@@ -292,3 +292,37 @@ func TestDownloadArtifactLimitWithoutContentLength(t *testing.T) {
 		t.Fatalf("DownloadArtifactWithProgressLimit() error = %v", err)
 	}
 }
+
+func TestDeleteRunArtifactsByNameDeletesOnlyExactMatches(t *testing.T) {
+	var deleted []string
+	client, closeServer := workflowTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/runs/77/artifacts":
+			_ = json.NewEncoder(w).Encode(ArtifactsResponse{Artifacts: []Artifact{
+				{ID: 1, Name: "ios-builder-build-id"},
+				{ID: 2, Name: "ios-builder-build-id-attacker"},
+				{ID: 3, Name: "ios-builder-deploy-build-id"},
+				{ID: 4, Name: "unrelated"},
+			}})
+		case r.Method == http.MethodDelete:
+			deleted = append(deleted, r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	})
+	defer closeServer()
+
+	err := client.DeleteRunArtifactsByName(context.Background(), "o", "r", 77,
+		"ios-builder-build-id", "ios-builder-deploy-build-id")
+	if err != nil {
+		t.Fatalf("DeleteRunArtifactsByName() error = %v", err)
+	}
+	want := []string{
+		"/repos/o/r/actions/artifacts/1",
+		"/repos/o/r/actions/artifacts/3",
+	}
+	if !reflect.DeepEqual(deleted, want) {
+		t.Fatalf("deleted = %#v, want %#v", deleted, want)
+	}
+}

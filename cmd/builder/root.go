@@ -644,7 +644,7 @@ func init() {
 	iosBuildCmd.Flags().StringP("remote", "r", "origin", "Git remote to push the working-tree snapshot to")
 	iosCmd.AddCommand(iosBuildCmd)
 	iosDeployCmd.Flags().StringP("output", "o", "dist", "Output directory for decrypted diagnostic logs")
-	iosDeployCmd.Flags().Duration("timeout", 45*time.Minute, "Deployment timeout, including Environment approval")
+	iosDeployCmd.Flags().Duration("timeout", 3*time.Hour, "Deployment timeout, including Environment approval")
 	iosDeployCmd.Flags().StringP("remote", "r", "origin", "Git remote to push the working-tree snapshot to")
 	iosCmd.AddCommand(iosDeployCmd)
 

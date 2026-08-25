@@ -36,6 +36,7 @@ const (
 	maxIPAEntries          = 100000
 	maxInfoPlistSize       = int64(4 * 1024 * 1024)
 	cleanupTimeout         = 30 * time.Second
+	cancelWaitTimeout      = 20 * time.Second
 	artifactIndexTimeout   = 30 * time.Second
 )
 
@@ -95,7 +96,7 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 			return
 		}
 		if runID != 0 {
-			c.cancelCentralRun(owner, repo, runID)
+			c.cancelCentralRun(owner, repo, runID, buildID)
 			return
 		}
 		c.cancelCentralRunByBuildID(owner, repo, workflow, buildID)
@@ -117,6 +118,9 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 		c.showCentralRunningStep(ctx, owner, repo, run.ID)
 	})
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) && opts.TestFlight {
+			err = fmt.Errorf("TestFlight deployment exceeded its %s deadline; if sign-and-deploy is waiting, approve the apple-production Environment before retrying: %w", opts.Timeout, err)
+		}
 		c.progress.Error(PhaseBuilding, err)
 		return result, fmt.Errorf("central build did not complete: %w", err)
 	}
@@ -545,12 +549,16 @@ func (c *Coordinator) deleteSnapshotLease(remote, ref, sha string) {
 	}
 }
 
-func (c *Coordinator) cancelCentralRun(owner, repo string, runID int64) {
+func (c *Coordinator) cancelCentralRun(owner, repo string, runID int64, buildID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 	defer cancel()
 	if err := c.github.CancelWorkflowRun(ctx, owner, repo, runID); err != nil {
 		c.progress.Warn(fmt.Sprintf("could not cancel workflow run %d: %v", runID, err))
 	}
+	if _, err := c.github.PollForWorkflowCompletion(ctx, owner, repo, runID, cancelWaitTimeout, nil); err != nil {
+		c.progress.Warn(fmt.Sprintf("could not confirm workflow run %d stopped before artifact cleanup: %v", runID, err))
+	}
+	c.deleteCentralBuildArtifacts(ctx, owner, repo, runID, buildID)
 }
 
 func (c *Coordinator) cancelCentralRunByBuildID(owner, repo, workflow, buildID string) {
@@ -563,6 +571,17 @@ func (c *Coordinator) cancelCentralRunByBuildID(owner, repo, workflow, buildID s
 	}
 	if err := c.github.CancelWorkflowRun(ctx, owner, repo, run.ID); err != nil {
 		c.progress.Warn(fmt.Sprintf("could not cancel workflow run %d: %v", run.ID, err))
+	}
+	if _, err := c.github.PollForWorkflowCompletion(ctx, owner, repo, run.ID, cancelWaitTimeout, nil); err != nil {
+		c.progress.Warn(fmt.Sprintf("could not confirm workflow run %d stopped before artifact cleanup: %v", run.ID, err))
+	}
+	c.deleteCentralBuildArtifacts(ctx, owner, repo, run.ID, buildID)
+}
+
+func (c *Coordinator) deleteCentralBuildArtifacts(ctx context.Context, owner, repo string, runID int64, buildID string) {
+	if err := c.github.DeleteRunArtifactsByName(ctx, owner, repo, runID,
+		centralArtifactPrefix+buildID, centralDeployPrefix+buildID); err != nil {
+		c.progress.Warn(fmt.Sprintf("could not delete encrypted artifacts for workflow run %d: %v", runID, err))
 	}
 }
 
