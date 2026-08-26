@@ -124,7 +124,7 @@ func createASCProvisioningProfile(ctx context.Context, api *appStoreConnectClien
 		return "", err
 	}
 	if response.Data == nil || response.Data.Type != "profiles" {
-		return "", fmt.Errorf("App Store Connect returned no created provisioning profile")
+		return "", fmt.Errorf("no created provisioning profile returned by App Store Connect")
 	}
 	var attributes ascProfileAttributes
 	if json.Unmarshal(response.Data.Attributes, &attributes) != nil || attributes.ProfileType != ascAppStoreProfileType {
@@ -170,7 +170,7 @@ func findASCCertificate(ctx context.Context, api *appStoreConnectClient, identit
 			return resource.ID, nil
 		}
 	}
-	return "", fmt.Errorf("App Store Connect does not contain the imported distribution certificate")
+	return "", fmt.Errorf("imported distribution certificate not found in App Store Connect")
 }
 
 func writeASCProfileContent(value, destination string) error {
