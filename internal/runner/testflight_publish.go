@@ -93,7 +93,7 @@ func betaGroupForBundle(raw, bundleID string) (*betaGroupConfig, error) {
 	}
 	for configuredBundle, group := range groups {
 		if !bundleIDPattern.MatchString(configuredBundle) || !betaGroupIDPattern.MatchString(group.GroupID) ||
-			!publicLinkIDPattern.MatchString(group.PublicLinkID) {
+			(group.PublicLinkID != "" && !publicLinkIDPattern.MatchString(group.PublicLinkID)) {
 			return nil, fmt.Errorf("invalid protected beta group configuration")
 		}
 	}
@@ -228,16 +228,35 @@ func publishToBetaGroup(ctx context.Context, api *appStoreConnectClient, request
 		!buildPattern.MatchString(request.BuildNumber) {
 		return fmt.Errorf("invalid TestFlight publishing metadata")
 	}
-	appID, err := findASCApp(ctx, api, request.BundleID)
+	appID, build, err := waitForUploadedASCBuild(ctx, api, request.BundleID, request.MarketingVersion, request.BuildNumber, privateLog)
 	if err != nil {
 		return err
+	}
+	return publishProcessedASCBuildToBetaGroup(ctx, api, appID, build, request, privateLog)
+}
+
+func waitForUploadedASCBuild(ctx context.Context, api *appStoreConnectClient, bundleID, marketingVersion, buildNumber string, privateLog io.Writer) (string, ascBuild, error) {
+	if api == nil || !bundleIDPattern.MatchString(bundleID) || !marketingPattern.MatchString(marketingVersion) ||
+		!buildPattern.MatchString(buildNumber) || privateLog == nil {
+		return "", ascBuild{}, fmt.Errorf("invalid TestFlight processing metadata")
+	}
+	appID, err := findASCApp(ctx, api, bundleID)
+	if err != nil {
+		return "", ascBuild{}, err
+	}
+	_, _ = fmt.Fprintf(privateLog, "Waiting for TestFlight build %s (%s) to finish processing.\n", marketingVersion, buildNumber)
+	build, err := waitForASCBuild(ctx, api, appID, marketingVersion, buildNumber, privateLog)
+	if err != nil {
+		return "", ascBuild{}, err
+	}
+	return appID, build, nil
+}
+
+func publishProcessedASCBuildToBetaGroup(ctx context.Context, api *appStoreConnectClient, appID string, build ascBuild, request *betaPublishRequest, privateLog io.Writer) error {
+	if api == nil || request == nil || appID == "" || build.ID == "" || privateLog == nil {
+		return fmt.Errorf("invalid TestFlight publishing metadata")
 	}
 	group, err := findASCBetaGroup(ctx, api, appID, request.Group)
-	if err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(privateLog, "Waiting for TestFlight build %s (%s) to finish processing.\n", request.MarketingVersion, request.BuildNumber)
-	build, err := waitForASCBuild(ctx, api, appID, request.MarketingVersion, request.BuildNumber, privateLog)
 	if err != nil {
 		return err
 	}
@@ -385,7 +404,16 @@ func findASCBetaGroup(ctx context.Context, api *appStoreConnectClient, appID str
 			continue
 		}
 		group, err := decodeASCBetaGroup(resource)
-		if err != nil || group.PublicLinkID != configured.PublicLinkID ||
+		if err != nil {
+			return ascBetaGroup{}, err
+		}
+		if configured.PublicLinkID == "" {
+			if !group.Internal {
+				return ascBetaGroup{}, fmt.Errorf("external TestFlight beta groups require an expected public link")
+			}
+			return group, nil
+		}
+		if group.Internal || group.PublicLinkID != configured.PublicLinkID ||
 			!strings.HasSuffix(strings.TrimRight(group.PublicLink, "/"), "/"+configured.PublicLinkID) {
 			return ascBetaGroup{}, fmt.Errorf("configured TestFlight beta group does not own the expected public link")
 		}

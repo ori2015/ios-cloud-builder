@@ -780,7 +780,10 @@ func runBuild(ctx context.Context, cfg *config.Config, opts build.BuildOptions) 
 	}
 
 	if result.TestFlight {
-		fmt.Println("TestFlight: upload accepted by App Store Connect")
+		fmt.Println("TestFlight: build processed successfully by App Store Connect")
+		if result.LogPath != "" {
+			fmt.Printf("Apple log: %s\n", result.LogPath)
+		}
 	} else {
 		fmt.Printf("IPA: %s\n", result.IPAPath)
 	}

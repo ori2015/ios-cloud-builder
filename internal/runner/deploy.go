@@ -379,17 +379,21 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 		return fmt.Errorf("upload to App Store Connect failed")
 	}
 	_, _ = fmt.Fprintln(privateLog, "App Store Connect accepted the signed IPA upload.")
+	if credentials.issuerID == "" {
+		return fmt.Errorf("TestFlight processing verification requires an App Store Connect issuer ID")
+	}
+	if publisher == nil {
+		publisher, err = newAppStoreConnectClient(credentials.apiKeyID, credentials.issuerID, credentials.apiKey)
+		if err != nil {
+			return err
+		}
+	}
+	appID, processedBuild, err := waitForUploadedASCBuild(ctx, publisher, bundleID, marketingVersion, buildNumber, privateLog)
+	if err != nil {
+		return err
+	}
 	if betaGroup != nil {
-		if credentials.issuerID == "" {
-			return fmt.Errorf("beta group publishing requires an App Store Connect issuer ID")
-		}
-		if publisher == nil {
-			publisher, err = newAppStoreConnectClient(credentials.apiKeyID, credentials.issuerID, credentials.apiKey)
-			if err != nil {
-				return err
-			}
-		}
-		if err := publishToBetaGroup(ctx, publisher, &betaPublishRequest{
+		if err := publishProcessedASCBuildToBetaGroup(ctx, publisher, appID, processedBuild, &betaPublishRequest{
 			BundleID:         bundleID,
 			MarketingVersion: marketingVersion,
 			BuildNumber:      buildNumber,

@@ -178,6 +178,11 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 		return result, fmt.Errorf("%s failed with conclusion %s; decrypted diagnostics: %s", kind, run.Conclusion, logPath)
 	}
 	if opts.TestFlight {
+		logPath, logErr := decryptLogToFile(identity, contents.log, opts.OutputDir, buildID)
+		if logErr != nil {
+			return result, fmt.Errorf("decrypt successful TestFlight diagnostic: %w", logErr)
+		}
+		result.LogPath = logPath
 		result.Duration = time.Since(started)
 		c.progress.Complete(PhaseBuilding, "Signed TestFlight deployment completed")
 		c.progress.Finish()
