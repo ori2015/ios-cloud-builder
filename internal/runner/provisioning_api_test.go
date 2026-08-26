@@ -64,9 +64,12 @@ func TestCreateASCProvisioningProfileBindsExactCertificate(t *testing.T) {
 			if r.URL.Query().Get("filter[certificateType]") != "DISTRIBUTION,IOS_DISTRIBUTION" {
 				t.Fatalf("unexpected certificate query: %s", r.URL.RawQuery)
 			}
+			if strings.Contains(r.URL.Query().Get("fields[certificates]"), "activated") {
+				t.Fatalf("requested unsupported certificate field: %s", r.URL.RawQuery)
+			}
 			attributes, _ := json.Marshal(map[string]any{
 				"certificateType": "DISTRIBUTION", "certificateContent": base64.StdEncoding.EncodeToString(certificate),
-				"expirationDate": time.Now().Add(24 * time.Hour).UTC(), "activated": true,
+				"expirationDate": time.Now().Add(24 * time.Hour).UTC(),
 			})
 			writeASCJSON(w, `{"data":[{"type":"certificates","id":"cert1","attributes":`+string(attributes)+`}]}`)
 		case "/v1/profiles":
@@ -105,7 +108,7 @@ func TestCreateASCProvisioningProfileBindsExactCertificate(t *testing.T) {
 func TestFindASCCertificateRejectsDifferentIdentity(t *testing.T) {
 	attributes, _ := json.Marshal(map[string]any{
 		"certificateType": "DISTRIBUTION", "certificateContent": base64.StdEncoding.EncodeToString([]byte("other certificate")),
-		"expirationDate": time.Now().Add(24 * time.Hour).UTC(), "activated": true,
+		"expirationDate": time.Now().Add(24 * time.Hour).UTC(),
 	})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeASCJSON(w, `{"data":[{"type":"certificates","id":"cert1","attributes":`+string(attributes)+`}]}`)
@@ -123,7 +126,7 @@ func TestFindASCCertificateRejectsNonDistributionType(t *testing.T) {
 	fingerprint := sha1.Sum(certificate) // #nosec G401 -- mirrors Apple's signing identity fingerprint.
 	attributes, _ := json.Marshal(map[string]any{
 		"certificateType": "DEVELOPMENT", "certificateContent": base64.StdEncoding.EncodeToString(certificate),
-		"expirationDate": time.Now().Add(24 * time.Hour).UTC(), "activated": true,
+		"expirationDate": time.Now().Add(24 * time.Hour).UTC(),
 	})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeASCJSON(w, `{"data":[{"type":"certificates","id":"cert1","attributes":`+string(attributes)+`}]}`)

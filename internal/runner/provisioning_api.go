@@ -138,7 +138,7 @@ func createASCProvisioningProfile(ctx context.Context, api *appStoreConnectClien
 
 func findASCCertificate(ctx context.Context, api *appStoreConnectClient, identityFingerprint string) (string, error) {
 	query := url.Values{
-		"fields[certificates]":    {"certificateType,certificateContent,expirationDate,activated"},
+		"fields[certificates]":    {"certificateType,certificateContent,expirationDate"},
 		"filter[certificateType]": {"DISTRIBUTION,IOS_DISTRIBUTION"},
 		"limit":                   {"200"},
 	}
@@ -151,7 +151,6 @@ func findASCCertificate(ctx context.Context, api *appStoreConnectClient, identit
 			CertificateType    string    `json:"certificateType"`
 			CertificateContent string    `json:"certificateContent"`
 			ExpirationDate     time.Time `json:"expirationDate"`
-			Activated          bool      `json:"activated"`
 		}
 		if resource.Type != "certificates" || json.Unmarshal(resource.Attributes, &attributes) != nil {
 			return "", fmt.Errorf("parse App Store Connect signing certificate")
@@ -164,7 +163,7 @@ func findASCCertificate(ctx context.Context, api *appStoreConnectClient, identit
 			return "", fmt.Errorf("decode App Store Connect signing certificate")
 		}
 		fingerprint := sha1.Sum(certificate) // #nosec G401 -- required to match Apple's signing identity.
-		if strings.EqualFold(hex.EncodeToString(fingerprint[:]), identityFingerprint) && attributes.Activated &&
+		if strings.EqualFold(hex.EncodeToString(fingerprint[:]), identityFingerprint) &&
 			attributes.ExpirationDate.After(time.Now().Add(5*time.Minute)) {
 			return resource.ID, nil
 		}
