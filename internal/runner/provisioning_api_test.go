@@ -20,10 +20,10 @@ func TestDownloadASCProvisioningProfilesUsesExactBundle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/bundleIds":
-			if r.URL.Query().Get("filter[identifier]") != "com.example.app" || r.URL.Query().Get("filter[platform]") != "IOS" {
+			if r.URL.Query().Get("filter[identifier]") != "com.example.app" || r.URL.Query().Has("filter[platform]") {
 				t.Fatalf("unexpected bundle query: %s", r.URL.RawQuery)
 			}
-			writeASCJSON(w, `{"data":[{"type":"bundleIds","id":"bundle1","attributes":{"identifier":"com.example.app","platform":"IOS"}}]}`)
+			writeASCJSON(w, `{"data":[{"type":"bundleIds","id":"bundle1","attributes":{"identifier":"com.example.app","platform":"UNIVERSAL"}}]}`)
 		case "/v1/bundleIds/bundle1/profiles":
 			writeASCJSON(w, `{"data":[`+
 				`{"type":"profiles","id":"profile1","attributes":{"name":"active","profileType":"IOS_APP_STORE","profileState":"ACTIVE","profileContent":"`+profile+`"}},`+

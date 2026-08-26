@@ -62,7 +62,6 @@ func downloadASCProvisioningProfiles(ctx context.Context, api *appStoreConnectCl
 func findASCBundleID(ctx context.Context, api *appStoreConnectClient, bundleID string) (string, error) {
 	query := url.Values{
 		"filter[identifier]": {bundleID},
-		"filter[platform]":   {"IOS"},
 		"fields[bundleIds]":  {"identifier,platform"},
 		"limit":              {"200"},
 	}
@@ -79,7 +78,7 @@ func findASCBundleID(ctx context.Context, api *appStoreConnectClient, bundleID s
 		if resource.Type != "bundleIds" || json.Unmarshal(resource.Attributes, &attributes) != nil {
 			return "", fmt.Errorf("parse App Store Connect bundle identifier")
 		}
-		if attributes.Identifier == bundleID && attributes.Platform == "IOS" {
+		if attributes.Identifier == bundleID && (attributes.Platform == "IOS" || attributes.Platform == "UNIVERSAL") {
 			if exact != "" {
 				return "", fmt.Errorf("multiple App Store Connect bundle identifiers matched exactly")
 			}
@@ -87,7 +86,7 @@ func findASCBundleID(ctx context.Context, api *appStoreConnectClient, bundleID s
 		}
 	}
 	if exact == "" {
-		return "", fmt.Errorf("no exact iOS bundle identifier exists in App Store Connect")
+		return "", fmt.Errorf("no exact iOS-compatible bundle identifier exists in App Store Connect")
 	}
 	return exact, nil
 }
