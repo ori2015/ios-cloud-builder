@@ -306,7 +306,7 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 			if len(profilePaths) == 0 {
 				return err
 			}
-			_, _ = fmt.Fprintln(privateLog, "App Store Connect profile discovery failed; trying protected fallback profiles.")
+			_, _ = fmt.Fprintf(privateLog, "App Store Connect profile discovery failed: %v\nTrying protected fallback profiles.\n", err)
 		} else {
 			profilePaths = append(profilePaths, downloaded...)
 		}
