@@ -41,7 +41,7 @@ func EncryptSecret(publicKey, value string) (string, error) {
 	return github.EncryptSecret(publicKey, value)
 }
 
-// ValidateProductionEnvironment verifies reviewer and exact branch controls.
+// ValidateProductionEnvironment verifies automatic deployment and exact branch controls.
 func ValidateProductionEnvironment(environment *Environment, policies []DeploymentBranchPolicyEntry, trustedBranch string) error {
 	return github.ValidateProductionEnvironment(environment, policies, trustedBranch)
 }

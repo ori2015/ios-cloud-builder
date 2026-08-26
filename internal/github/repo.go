@@ -97,27 +97,16 @@ func (c *Client) GetDeploymentBranchPolicies(ctx context.Context, owner, repo, e
 	return response.BranchPolicies, nil
 }
 
-// ValidateProductionEnvironment fails closed unless deployment needs a real
-// reviewer, allows self-review, and is restricted to exactly the trusted branch.
+// ValidateProductionEnvironment fails closed unless deployment starts without
+// a manual approval gate and is restricted to exactly the trusted branch.
 func ValidateProductionEnvironment(environment *Environment, policies []DeploymentBranchPolicyEntry, trustedBranch string) error {
 	if environment == nil || environment.Name == "" {
 		return errors.New("deployment Environment metadata is missing")
 	}
-	var reviewersConfigured bool
 	for _, rule := range environment.ProtectionRules {
-		if rule.Type != "required_reviewers" {
-			continue
+		if rule.Type == "required_reviewers" {
+			return errors.New("manual deployment approval must not be configured")
 		}
-		if rule.PreventSelfReview {
-			return errors.New("prevent self-review must be disabled for the single-operator workflow")
-		}
-		if len(rule.Reviewers) == 0 {
-			return errors.New("required reviewer rule has no reviewers")
-		}
-		reviewersConfigured = true
-	}
-	if !reviewersConfigured {
-		return errors.New("required reviewer protection is not configured")
 	}
 	branchPolicy := environment.DeploymentBranchPolicy
 	if branchPolicy == nil || branchPolicy.ProtectedBranches || !branchPolicy.CustomBranchPolicies {

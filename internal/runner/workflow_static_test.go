@@ -97,8 +97,6 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 		"APPLE_SIGNING_AGE_IDENTITY", "APPLE_DISTRIBUTION_P12", "APPLE_PROVISIONING_PROFILE", "APPLE_PROVISIONING_PROFILES",
 		"ASC_API_KEY_P8", "deploy-testflight", "--build-number auto", "ios-builder-deploy-${{ inputs.build_id }}",
 		"TESTFLIGHT_BETA_GROUPS: ${{ secrets.TESTFLIGHT_BETA_GROUPS }}",
-		"notify-approval:", "TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}", "TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}",
-		"APPROVAL_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
 	} {
 		if !strings.Contains(text, required) {
 			t.Errorf("central workflow missing %q", required)
@@ -155,7 +153,8 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 		"pull_request:", "pull_request_target:", "issue_comment:", "workflow_run:",
 		"actions/cache", "DerivedData cache", "use_signing", "IOS_CERTIFICATE",
 		"GITHUB_STEP_SUMMARY", "eval ", "printenv", "git remote -v", "npm install",
-		"app-id:", "encrypted/*.age",
+		"app-id:", "encrypted/*.age", "notify-approval:", "TELEGRAM_BOT_TOKEN",
+		"TELEGRAM_CHAT_ID", "APPROVAL_URL", "approval required",
 	} {
 		if strings.Contains(text, forbidden) {
 			t.Errorf("central workflow contains forbidden text %q", forbidden)

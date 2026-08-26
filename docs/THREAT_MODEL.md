@@ -12,7 +12,7 @@ Central mode is designed so a public repository never commits private applicatio
 - Public Actions logs, artifacts, caches, inputs, summaries, annotations, and public pull requests are untrusted/public territory.
 - Maintainers with write/admin access to the public builder are highly trusted. They can modify the workflow or helper and can dispatch builds. Keep this group minimal.
 - Private application build scripts and dependencies execute arbitrary code on the runner. Environment scrubbing prevents accidental access to known Actions channels and tokens, but is not a sandbox and cannot prevent all network exfiltration by a malicious project.
-- The TestFlight signing job trusts the approved public-builder revision, GitHub Environment controls, GitHub Actions/Sigstore control plane, Apple signing material, and the authenticated unsigned IPA produced by the isolated `trusted-package` job. It never checks out or executes private project source.
+- The TestFlight signing job trusts the reviewed public-builder revision, GitHub Environment controls, GitHub Actions/Sigstore control plane, Apple signing material, and the authenticated unsigned IPA produced by the isolated `trusted-package` job. It never checks out or executes private project source.
 
 ## Threats and mitigations
 
@@ -24,7 +24,13 @@ The private-source workflow is `workflow_dispatch` only. PR CI has read-only per
 
 An authorized writer could change the trusted helper, select a private repository installed for the App, or substitute their own AGE recipient. Protect `main`, require review for `.github/workflows/ios-build.yml`, `internal/runner`, `internal/security`, and central coordination code, and audit dispatches. Repository administrators remain trusted because they can bypass repository controls.
 
-For TestFlight, also require approval on `apple-production` and restrict it to the protected default branch. Approval must be based on the exact workflow revision being run. Environment protection cannot defend against a repository administrator who can change or bypass those rules.
+For TestFlight, restrict `apple-production` to the protected default branch. The
+deployment starts automatically after trusted packaging, so branch protection,
+CODEOWNERS review, minimal repository write access, and dispatch auditing are
+the controls against unauthorized workflow changes. A compromised authorized
+dispatch path can cause an automatic TestFlight upload; this is an accepted
+single-operator tradeoff. Environment controls cannot defend against a
+repository administrator who can change or bypass them.
 
 ### Stolen GitHub App private key
 
@@ -72,8 +78,8 @@ The distribution certificate, its password, provisioning profile bundle, App Sto
 Connect key, and transport AGE identity are Environment secrets. Secret values
 are removed from the trusted runner's environment before child processes start,
 sensitive command arguments are not written to diagnostics, and credential
-files/keychains live only under runner-temporary paths. Required-reviewer and
-branch restrictions are mandatory operational controls. Revoke Apple or AGE
+files/keychains live only under runner-temporary paths. Exact default-branch
+restriction is a mandatory operational control. Revoke Apple or AGE
 credentials immediately after suspected disclosure; encryption at rest does not
 repair a previously exposed credential.
 

@@ -191,11 +191,7 @@ func TestEnvironmentMetadataEndpoints(t *testing.T) {
 
 func TestValidateProductionEnvironment(t *testing.T) {
 	valid := &Environment{
-		Name: "apple-production",
-		ProtectionRules: []EnvironmentRule{{
-			Type:      "required_reviewers",
-			Reviewers: []EnvironmentReviewer{{Type: "User"}},
-		}},
+		Name:                   "apple-production",
 		DeploymentBranchPolicy: &DeploymentBranchPolicy{CustomBranchPolicies: true},
 	}
 	policies := []DeploymentBranchPolicyEntry{{Name: "main", Type: "branch"}}
@@ -208,8 +204,11 @@ func TestValidateProductionEnvironment(t *testing.T) {
 		mutate   func(*Environment)
 		policies []DeploymentBranchPolicyEntry
 	}{
-		{name: "missing reviewers", mutate: func(environment *Environment) { environment.ProtectionRules = nil }},
-		{name: "self review blocked", mutate: func(environment *Environment) { environment.ProtectionRules[0].PreventSelfReview = true }},
+		{name: "manual approval configured", mutate: func(environment *Environment) {
+			environment.ProtectionRules = []EnvironmentRule{{
+				Type: "required_reviewers", Reviewers: []EnvironmentReviewer{{Type: "User"}},
+			}}
+		}},
 		{name: "protected branches instead of exact branch", mutate: func(environment *Environment) {
 			environment.DeploymentBranchPolicy = &DeploymentBranchPolicy{ProtectedBranches: true}
 		}},
@@ -219,7 +218,6 @@ func TestValidateProductionEnvironment(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			copyEnvironment := *valid
-			copyEnvironment.ProtectionRules = append([]EnvironmentRule(nil), valid.ProtectionRules...)
 			if test.mutate != nil {
 				test.mutate(&copyEnvironment)
 			}

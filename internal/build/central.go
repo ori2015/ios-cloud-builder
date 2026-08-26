@@ -121,7 +121,7 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 	})
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) && opts.TestFlight {
-			err = fmt.Errorf("TestFlight deployment exceeded its %s deadline; if sign-and-deploy is waiting, approve the apple-production Environment before retrying: %w", opts.Timeout, err)
+			err = fmt.Errorf("TestFlight deployment exceeded its %s deadline: %w", opts.Timeout, err)
 		}
 		c.progress.Error(PhaseBuilding, err)
 		return result, fmt.Errorf("central build did not complete: %w", err)

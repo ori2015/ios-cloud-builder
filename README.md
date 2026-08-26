@@ -19,9 +19,9 @@ The optional TestFlight path adds two clean hosted-runner boundaries. The build
 job encrypts untrusted project output to an isolated packaging job. That job
 executes no project code, recreates the IPA under a trusted temporary root, and
 uses GitHub Sigstore to attest the exact ciphertext and provenance manifest.
-After approval of `apple-production`, the signing job verifies that attestation
-before any Apple credential is injected, then signs and uploads directly to App
-Store Connect. GitHub stores no signed IPA artifact.
+The `apple-production` signing job starts automatically, verifies that
+attestation before any Apple credential is injected, then signs and uploads
+directly to App Store Connect. GitHub stores no signed IPA artifact.
 
 The original repository backend remains available for existing MobAI users and repository-local builds. Simulator sharing, MobAI integration, Flutter/React Native/KMP development commands, framework detection, working-tree snapshots, signing tools, and public Go wrappers are retained. See [the upstream relationship](docs/UPSTREAM.md).
 
@@ -33,7 +33,7 @@ The original repository backend remains available for existing MobAI users and r
 - Private source is pushed only to the private source repository, under a temporary non-branch ref.
 - The GitHub App has Metadata read and Contents read only and is installed on explicitly selected repositories.
 - The build job requests an installation token for exactly one registry-authorized source repository, checks out with `persist-credentials: false`, then revokes the token before project code runs.
-- Unsigned build remains the default; Apple credentials are available only to the manually protected `apple-production` job.
+- Unsigned build remains the default; Apple credentials are available only to the branch-restricted `apple-production` job.
 - The signing job never checks out private source and never runs project scripts or dependencies.
 - Detailed dependency/compiler output is redirected to a private log from process start.
 - Build logs and locally downloaded IPAs are encrypted to the caller's local-only AGE identity. TestFlight uses distinct build-to-package and package-to-signing AGE identities.
@@ -118,18 +118,11 @@ Protect the builder's default branch, require review for CODEOWNERS paths, keep 
 ## Optional protected TestFlight setup
 
 Create a GitHub Environment named `apple-production` in the **public builder**.
-Require a reviewer, restrict deployment to the protected default branch, and do
-not allow unreviewed workflow changes. For a single-operator repository, leave
-**Prevent self-review** disabled so the operator who dispatched the build can
-approve it. Environment approval is the point at which Apple credentials become
-available to the signing job.
-
-To receive a Telegram message as soon as a successful unsigned build is ready
-for that approval, configure repository secrets `TELEGRAM_BOT_TOKEN` and
-`TELEGRAM_CHAT_ID` in the public builder. The notification job checks out no
-source and sends only the public build ID and Actions approval URL. Notification
-failure is reported as a warning and never blocks or fails the protected
-deployment.
+Do not configure required reviewers or a wait timer. Restrict deployment to the
+protected default branch and do not allow unreviewed workflow changes. After a
+successful trusted packaging job, signing and TestFlight deployment start
+automatically. Apple credentials remain scoped to the Environment and are made
+available only to the isolated signing job.
 
 Generate two dedicated AGE identities: one for the untrusted build-to-package
 transport and one for package-to-signing transport. Put the first public
@@ -187,7 +180,7 @@ imported distribution-certificate fingerprint, and creates an `IOS_APP_STORE`
 profile through Apple's API when none is usable. The downloaded profile exists
 only in the disposable signing workspace. Stored profile secrets remain optional
 fallbacks for API incidents or migrations. The Team key applies across apps, so
-keep the protected Environment approval and branch allowlist in place.
+keep the exact Environment branch allowlist in place.
 Revoke and replace any certificate, API key, or GitHub App key that was ever
 committed, pasted into a public log, or otherwise exposed; moving an exposed
 credential into a secret does not make the old credential safe.
@@ -329,11 +322,9 @@ builder ios deploy
 builder ios build --testflight
 ```
 
-The command may wait for approval of `apple-production`; its default three-hour
-timeout includes that approval window and can be changed with `--timeout`. On
-success, App Store Connect has accepted the upload for processing; TestFlight
-processing itself is asynchronous. No signed IPA is downloaded or retained as a
-GitHub artifact.
+The command's default three-hour timeout includes build, signing, upload, and
+configured App Store Connect processing; it can be changed with `--timeout`.
+No signed IPA is downloaded or retained as a GitHub artifact.
 The protected job queries App Store Connect for the application's existing builds
 under the current marketing version, increments the highest leading build-number
 component, and replaces only `CFBundleVersion` before signing. This preserves one
@@ -396,9 +387,9 @@ With `--testflight`, doctor additionally verifies metadata for
 `PACKAGING_RECIPIENT`, `PACKAGING_AGE_IDENTITY`,
 `APPLE_SIGNING_RECIPIENT`, the `apple-production` Environment, `APPLE_TEAM_ID`,
 every required Environment secret, either `APPLE_PROVISIONING_PROFILES` or the
-legacy `APPLE_PROVISIONING_PROFILE`, a non-empty required-reviewer rule with
-self-review allowed, and an exact custom branch allowlist containing only the
-builder's default branch. It cannot verify secret values or profile coverage.
+legacy `APPLE_PROVISIONING_PROFILE`, the absence of a manual approval rule, and
+an exact custom branch allowlist containing only the builder's default branch.
+It cannot verify secret values or profile coverage.
 
 ## Updating and contributing
 

@@ -47,8 +47,8 @@ type ActionSecret struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Environment is deployment-environment metadata used by doctor to verify the
-// minimum reviewer and branch protections without accessing secret values.
+// Environment is deployment-environment metadata used by doctor to verify
+// automatic deployment and branch restrictions without accessing secret values.
 type Environment struct {
 	ID                     int64                   `json:"id"`
 	Name                   string                  `json:"name"`
@@ -63,8 +63,9 @@ type EnvironmentRule struct {
 	Reviewers         []EnvironmentReviewer `json:"reviewers"`
 }
 
-// EnvironmentReviewer is a required deployment reviewer. The reviewer object
-// itself is intentionally omitted because doctor needs only rule cardinality.
+// EnvironmentReviewer is deployment reviewer metadata returned by GitHub.
+// The reviewer object itself is intentionally omitted because doctor only
+// needs to detect whether a manual approval rule exists.
 type EnvironmentReviewer struct {
 	Type string `json:"type"`
 }
