@@ -154,7 +154,13 @@ func deployTestFlight(args []string) error {
 		return fmt.Errorf("invalid TestFlight deployment arguments")
 	}
 	fmt.Println("Signing and uploading iOS application; detailed output is private")
-	if err := runner.ExecuteTestFlight(context.Background(), &options, recipient, outputDir); err != nil {
+	// Bounded well under the job's own 60-minute timeout so a hung subprocess
+	// (xcrun altool has no internal timeout of its own) fails with a
+	// diagnosable error and a flushed, encrypted log instead of silently
+	// eating the whole job budget with nothing to show for it afterward.
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	defer cancel()
+	if err := runner.ExecuteTestFlight(ctx, &options, recipient, outputDir); err != nil {
 		if err == runner.ErrDeployFailed {
 			return runner.ErrDeployFailed
 		}
