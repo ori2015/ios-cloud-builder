@@ -174,25 +174,27 @@ Configure these values in `apple-production`:
 | Environment secret | `APPLE_SIGNING_AGE_IDENTITY` | dedicated AGE identity |
 | Environment secret | `APPLE_DISTRIBUTION_P12` | base64-encoded `.p12` |
 | Environment secret | `APPLE_DISTRIBUTION_P12_PASSWORD` | `.p12` password |
-| Environment secret | `APPLE_PROVISIONING_PROFILES` | base64-encoded ZIP of App Store `.mobileprovision` files |
-| Environment secret (legacy) | `APPLE_PROVISIONING_PROFILE` | base64-encoded single App Store `.mobileprovision`; used when the bundle secret is absent |
+| Environment secret (optional fallback) | `APPLE_PROVISIONING_PROFILES` | base64-encoded ZIP of App Store `.mobileprovision` files |
+| Environment secret (legacy optional fallback) | `APPLE_PROVISIONING_PROFILE` | base64-encoded single App Store `.mobileprovision`; used when the bundle secret is absent |
 | Environment secret | `ASC_API_KEY_P8` | complete `.p8` PEM or its base64 encoding |
 | Environment secret | `ASC_KEY_ID` | App Store Connect API key ID |
 | Environment secret | `ASC_ISSUER_ID` | App Store Connect issuer UUID for a Team key; omit for an Individual key |
 
-Prefer an Individual App Store Connect key belonging to a dedicated Developer
-user whose app access is restricted to the applications this builder may upload.
-Individual keys do not use an issuer ID and cannot call Apple's provisioning
-endpoints; that is compatible with this manual-profile signing path. If a Team
-key is used instead, it applies across all apps and `ASC_ISSUER_ID` is required.
-Beta-group publishing also requires a Team key with `ASC_ISSUER_ID`; upload-only
-applications may continue using an Individual key.
+The central TestFlight path requires a Team App Store Connect key with
+`ASC_ISSUER_ID`. Inside the protected `apple-production` job, the signer lists
+active App Store profiles for the exact Bundle ID, verifies them against the
+imported distribution-certificate fingerprint, and creates an `IOS_APP_STORE`
+profile through Apple's API when none is usable. The downloaded profile exists
+only in the disposable signing workspace. Stored profile secrets remain optional
+fallbacks for API incidents or migrations. The Team key applies across apps, so
+keep the protected Environment approval and branch allowlist in place.
 Revoke and replace any certificate, API key, or GitHub App key that was ever
 committed, pasted into a public log, or otherwise exposed; moving an exposed
 credential into a secret does not make the old credential safe.
 
-Create the multi-application profile bundle on a trusted workstation. Filenames
-are only labels: the protected runner selects a profile from its signed
+If API-managed provisioning is temporarily unavailable, create the optional
+multi-application profile bundle on a trusted workstation. Filenames are only
+labels: the protected runner selects a profile from its signed
 `application-identifier` entitlement and requires an exact Bundle ID match.
 Keep only App Store distribution profiles for `APPLE_TEAM_ID` in this ZIP.
 
@@ -385,6 +387,10 @@ builder update
 - matching local AGE identity
 - explicit GitHub source remote
 - dry-run permission to push the temporary snapshot namespace
+
+With `--testflight`, it also requires the Team-key `ASC_ISSUER_ID`; provisioning
+profiles themselves are fetched or created by the protected signer and are not
+required as GitHub secrets.
 
 With `--testflight`, doctor additionally verifies metadata for
 `PACKAGING_RECIPIENT`, `PACKAGING_AGE_IDENTITY`,

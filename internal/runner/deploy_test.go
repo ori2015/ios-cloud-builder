@@ -164,6 +164,40 @@ func TestTakeAppleCredentialsAcceptsProfileBundleWithoutLegacyProfile(t *testing
 	}
 }
 
+func TestTakeAppleCredentialsAcceptsAPIManagedProfiles(t *testing.T) {
+	values := map[string]string{
+		"APPLE_DISTRIBUTION_P12":          "cDEy",
+		"APPLE_DISTRIBUTION_P12_PASSWORD": "password",
+		"APPLE_TEAM_ID":                   "TEAM123456",
+		"ASC_API_KEY_P8":                  "key",
+		"ASC_KEY_ID":                      "KEY1234567",
+		"ASC_ISSUER_ID":                   "00000000-0000-0000-0000-000000000000",
+	}
+	for name, value := range values {
+		t.Setenv(name, value)
+	}
+	credentials, err := takeAppleCredentials()
+	if err != nil || credentials.profile != "" || credentials.profiles != "" || credentials.issuerID == "" {
+		t.Fatalf("takeAppleCredentials() = %#v, %v", credentials, err)
+	}
+}
+
+func TestTakeAppleCredentialsRequiresIssuerWithoutStoredProfile(t *testing.T) {
+	values := map[string]string{
+		"APPLE_DISTRIBUTION_P12":          "cDEy",
+		"APPLE_DISTRIBUTION_P12_PASSWORD": "password",
+		"APPLE_TEAM_ID":                   "TEAM123456",
+		"ASC_API_KEY_P8":                  "key",
+		"ASC_KEY_ID":                      "KEY1234567",
+	}
+	for name, value := range values {
+		t.Setenv(name, value)
+	}
+	if credentials, err := takeAppleCredentials(); err == nil || credentials != nil {
+		t.Fatalf("takeAppleCredentials() = %#v, %v", credentials, err)
+	}
+}
+
 func TestTakeTransportIdentityUnsetsEnvironment(t *testing.T) {
 	identity, err := age.GenerateX25519Identity()
 	if err != nil {

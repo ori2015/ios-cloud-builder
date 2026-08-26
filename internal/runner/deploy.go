@@ -150,7 +150,8 @@ func takeAppleCredentials() (*appleCredentials, error) {
 		betaGroups:  take("TESTFLIGHT_BETA_GROUPS"),
 	}
 	if credentials.p12 == "" || credentials.p12Password == "" ||
-		(credentials.profile == "" && credentials.profiles == "") || credentials.teamID == "" || credentials.apiKey == "" ||
+		(credentials.profile == "" && credentials.profiles == "" && credentials.issuerID == "") ||
+		credentials.teamID == "" || credentials.apiKey == "" ||
 		credentials.apiKeyID == "" {
 		return nil, fmt.Errorf("protected Apple environment is incomplete")
 	}
@@ -246,10 +247,6 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 	if err := writeBase64Secret(credentials.p12, p12Path); err != nil {
 		return fmt.Errorf("decode distribution certificate")
 	}
-	profilePaths, err := materializeProvisioningProfiles(credentials.profile, credentials.profiles, secretsDir)
-	if err != nil {
-		return err
-	}
 	if err := writeTextOrBase64Secret(credentials.apiKey, apiKeyPath, "PRIVATE KEY"); err != nil {
 		return fmt.Errorf("decode App Store Connect key")
 	}
@@ -291,6 +288,30 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 	}
 	identityFingerprint, signingIdentity := identityMatch[1], identityMatch[2]
 
+	profilePaths, err := materializeProvisioningProfiles(credentials.profile, credentials.profiles, secretsDir)
+	if err != nil {
+		return err
+	}
+	var bundleResourceID string
+	if credentials.issuerID != "" {
+		if publisher == nil {
+			publisher, err = newAppStoreConnectClient(credentials.apiKeyID, credentials.issuerID, credentials.apiKey)
+			if err != nil {
+				return err
+			}
+		}
+		var downloaded []string
+		bundleResourceID, downloaded, err = downloadASCProvisioningProfiles(ctx, publisher, bundleID, secretsDir)
+		if err != nil {
+			if len(profilePaths) == 0 {
+				return err
+			}
+			_, _ = fmt.Fprintln(privateLog, "App Store Connect profile discovery failed; trying protected fallback profiles.")
+		} else {
+			profilePaths = append(profilePaths, downloaded...)
+		}
+	}
+
 	candidates := make([]provisioningProfileCandidate, 0, len(profilePaths))
 	for _, candidatePath := range profilePaths {
 		profileOutput, captureErr := run.capture(workRoot, "/usr/bin/security", "cms", "-D", "-i", candidatePath, "-k", keychainPath)
@@ -303,9 +324,28 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 		}
 		candidates = append(candidates, provisioningProfileCandidate{path: candidatePath, profile: candidate})
 	}
-	selected, err := selectProvisioningProfile(candidates, credentials.teamID, bundleID, identityFingerprint)
-	if err != nil {
-		return err
+	selected, selectionErr := selectProvisioningProfile(candidates, credentials.teamID, bundleID, identityFingerprint)
+	if selectionErr != nil && publisher != nil && bundleResourceID != "" {
+		createdPath, createErr := createASCProvisioningProfile(ctx, publisher, bundleResourceID, bundleID, identityFingerprint, secretsDir)
+		if createErr != nil {
+			return createErr
+		}
+		profileOutput, captureErr := run.capture(workRoot, "/usr/bin/security", "cms", "-D", "-i", createdPath, "-k", keychainPath)
+		if captureErr != nil {
+			return captureErr
+		}
+		var created provisioningProfile
+		if _, unmarshalErr := plist.Unmarshal(profileOutput, &created); unmarshalErr != nil {
+			return fmt.Errorf("parse App Store Connect provisioning profile")
+		}
+		candidates = append(candidates, provisioningProfileCandidate{path: createdPath, profile: created})
+		selected, selectionErr = selectProvisioningProfile(candidates, credentials.teamID, bundleID, identityFingerprint)
+		if selectionErr == nil {
+			_, _ = fmt.Fprintln(privateLog, "Created an App Store provisioning profile through the App Store Connect API.")
+		}
+	}
+	if selectionErr != nil {
+		return selectionErr
 	}
 	profilePath, profile := selected.path, selected.profile
 	installedProfile := filepath.Join(privateHome, "Library", "MobileDevice", "Provisioning Profiles", profile.UUID+".mobileprovision")

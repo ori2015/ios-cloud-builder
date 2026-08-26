@@ -384,7 +384,7 @@ func runCentralDoctor(cmd *cobra.Command, _ []string) error {
 		)
 		for _, name := range []string{
 			"APPLE_SIGNING_AGE_IDENTITY", "APPLE_DISTRIBUTION_P12", "APPLE_DISTRIBUTION_P12_PASSWORD",
-			"ASC_API_KEY_P8", "ASC_KEY_ID",
+			"ASC_API_KEY_P8", "ASC_KEY_ID", "ASC_ISSUER_ID",
 		} {
 			secretName := name
 			checks = append(checks, check{secretName + " environment secret", func(ctx context.Context) error {
@@ -392,15 +392,6 @@ func runCentralDoctor(cmd *cobra.Command, _ []string) error {
 				return err
 			}})
 		}
-		checks = append(checks, check{"provisioning profile environment secret", func(ctx context.Context) error {
-			if _, err := client.GetEnvironmentActionSecret(ctx, cfg.Builder.Owner, cfg.Builder.Repo, "apple-production", "APPLE_PROVISIONING_PROFILES"); err == nil {
-				return nil
-			}
-			if _, err := client.GetEnvironmentActionSecret(ctx, cfg.Builder.Owner, cfg.Builder.Repo, "apple-production", "APPLE_PROVISIONING_PROFILE"); err == nil {
-				return nil
-			}
-			return errors.New("configure APPLE_PROVISIONING_PROFILES or legacy APPLE_PROVISIONING_PROFILE")
-		}})
 	}
 	for _, item := range checks {
 		if err := item.fn(ctx); err != nil {
