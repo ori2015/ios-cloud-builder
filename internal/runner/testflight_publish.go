@@ -467,6 +467,14 @@ func waitForASCBuild(ctx context.Context, api *appStoreConnectClient, appID, ver
 		if remaining <= 0 {
 			return ascBuild{}, fmt.Errorf("timed out waiting for the exact uploaded build to finish App Store Connect processing")
 		}
+		if attempt == 1 || attempt%10 == 0 {
+			elapsed := (betaProcessingTimeout - remaining).Round(time.Second)
+			if found {
+				fmt.Printf("App Store Connect is still processing the build (%s elapsed)...\n", elapsed)
+			} else {
+				fmt.Printf("App Store Connect has not indexed the uploaded build yet (%s elapsed)...\n", elapsed)
+			}
+		}
 		_, _ = fmt.Fprintf(privateLog, "TestFlight processing poll %d; retrying in %s.\n", attempt, betaPollInterval)
 		timer := time.NewTimer(min(betaPollInterval, remaining))
 		select {

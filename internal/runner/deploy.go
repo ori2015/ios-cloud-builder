@@ -372,12 +372,15 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
 		return fmt.Errorf("signed IPA packaging produced no output")
 	}
+	fmt.Println("Validating application with App Store Connect...")
 	if err := uploadRun.runSensitive(workRoot, "/usr/bin/xcrun", altoolArgs("--validate-app", signedIPA, credentials)...); err != nil {
 		return fmt.Errorf("validation with App Store Connect failed")
 	}
+	fmt.Println("Uploading application to App Store Connect...")
 	if err := uploadRun.runSensitive(workRoot, "/usr/bin/xcrun", altoolArgs("--upload-app", signedIPA, credentials)...); err != nil {
 		return fmt.Errorf("upload to App Store Connect failed")
 	}
+	fmt.Println("App Store Connect accepted the upload. Waiting for it to finish processing the build...")
 	_, _ = fmt.Fprintln(privateLog, "App Store Connect accepted the signed IPA upload.")
 	if credentials.issuerID == "" {
 		return fmt.Errorf("TestFlight processing verification requires an App Store Connect issuer ID")
