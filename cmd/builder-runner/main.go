@@ -314,6 +314,7 @@ func execute(args []string) error {
 	flags.StringVar(&options.Framework, "framework", "", "")
 	flags.StringVar(&options.LogPath, "log", "", "")
 	flags.StringVar(&options.IPAPath, "ipa", "", "")
+	flags.StringVar(&options.BundleID, "bundle-id", "", "")
 	flags.StringVar(&recipient, "recipient", "", "")
 	flags.StringVar(&ipaRecipient, "ipa-recipient", "", "")
 	flags.StringVar(&outputDir, "output", "", "")

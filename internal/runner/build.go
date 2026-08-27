@@ -24,6 +24,11 @@ type BuildOptions struct {
 	Framework     string
 	LogPath       string
 	IPAPath       string
+	// BundleID, when set, is the registered application identity this build is
+	// allowed to produce. It is resolved from the protected registry before any
+	// project code is checked out, and enforced below against what the build
+	// actually produced.
+	BundleID string
 }
 
 // ExecuteSecure keeps the trusted runner resident while private project code
@@ -278,7 +283,33 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 	if !pathWithin(sourceRoot, appPath) && !pathWithin(filepath.Dir(options.LogPath), appPath) {
 		return fmt.Errorf("built application escaped trusted output roots")
 	}
+	if err := verifyBuiltBundleID(appPath, options.BundleID); err != nil {
+		return err
+	}
 	return packageIPA(run, appPath, options.IPAPath)
+}
+
+// verifyBuiltBundleID rejects a build whose application identity differs from
+// the one pinned in the protected registry.
+//
+// This runs here, in the trusted runner, rather than in the signing job: the
+// signing job reads the bundle identifier from this same application, and the
+// IPA's hash is bound into the attested provenance, so verifying it before
+// packaging means what the signer later reads has already been checked. It also
+// keeps the registry out of the signing job, which must not learn which private
+// repository a build came from.
+func verifyBuiltBundleID(appPath, expected string) error {
+	if expected == "" {
+		return nil // unsigned build of a project with no pinned identity
+	}
+	built, _, err := readAppMetadata(filepath.Join(appPath, "Info.plist"))
+	if err != nil {
+		return fmt.Errorf("read built application identity: %w", err)
+	}
+	if built != expected {
+		return fmt.Errorf("built application identity does not match the registered project")
+	}
+	return nil
 }
 
 func isNodeFramework(framework string) bool {

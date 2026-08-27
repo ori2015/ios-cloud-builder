@@ -148,6 +148,7 @@ jobs:
           IOS_PATH: ${{ steps.project.outputs.ios_path }}
           SCHEME: ${{ steps.project.outputs.scheme }}
           CONFIGURATION: ${{ steps.project.outputs.configuration }}
+          BUNDLE_ID: ${{ steps.project.outputs.bundle_id }}
           FRAMEWORK: ${{ steps.detect.outputs.framework }}
           ARTIFACT_RECIPIENT: ${{ inputs.artifact_recipient }}
           IPA_RECIPIENT: ${{ inputs.operation != 'build' && vars.PACKAGING_RECIPIENT || inputs.artifact_recipient }}
@@ -163,6 +164,7 @@ jobs:
             --scheme "$SCHEME" \
             --configuration "$CONFIGURATION" \
             --framework "$FRAMEWORK" \
+            --bundle-id "$BUNDLE_ID" \
             --log "$RUNNER_TEMP/private-output/build.log" \
             --ipa "$RUNNER_TEMP/private-output/App.ipa" \
             --recipient "$ARTIFACT_RECIPIENT" \
