@@ -42,7 +42,7 @@ func TestValidateAppStoreProfile(t *testing.T) {
 		DeveloperCertificates: [][]byte{[]byte("certificate")},
 		Entitlements:          map[string]any{"get-task-allow": false},
 	}
-	if err := validateAppStoreProfile(&valid); err != nil {
+	if err := validateDistributionProfile(&valid, ascAppStoreProfileType); err != nil {
 		t.Fatalf("valid profile rejected: %v", err)
 	}
 	for name, mutate := range map[string]func(*provisioningProfile){
@@ -58,8 +58,50 @@ func TestValidateAppStoreProfile(t *testing.T) {
 			profile.DeveloperCertificates = append([][]byte(nil), valid.DeveloperCertificates...)
 			profile.Entitlements = map[string]any{"get-task-allow": false}
 			mutate(&profile)
-			if err := validateAppStoreProfile(&profile); err == nil {
+			if err := validateDistributionProfile(&profile, ascAppStoreProfileType); err == nil {
 				t.Fatal("unsafe profile was accepted")
+			}
+		})
+	}
+}
+
+func TestValidateAdHocProfile(t *testing.T) {
+	valid := provisioningProfile{
+		ExpirationDate:        time.Now().Add(time.Hour),
+		Platform:              []string{"iOS"},
+		DeveloperCertificates: [][]byte{[]byte("certificate")},
+		ProvisionedDevices:    []string{"00008140-001660C401F3001C"},
+		Entitlements:          map[string]any{"get-task-allow": false},
+	}
+	if err := validateDistributionProfile(&valid, ascAdHocProfileType); err != nil {
+		t.Fatalf("valid ad hoc profile rejected: %v", err)
+	}
+	// The device list is the only structural difference between the two kinds,
+	// so neither may be accepted in the other's place: an ad hoc profile with no
+	// devices installs nowhere, and an App Store profile has none by definition.
+	noDevices := valid
+	noDevices.ProvisionedDevices = nil
+	if err := validateDistributionProfile(&noDevices, ascAdHocProfileType); err == nil {
+		t.Fatal("ad hoc profile without devices was accepted")
+	}
+	if err := validateDistributionProfile(&valid, ascAppStoreProfileType); err == nil {
+		t.Fatal("ad hoc profile was accepted as an App Store profile")
+	}
+	for name, mutate := range map[string]func(*provisioningProfile){
+		"expired":      func(profile *provisioningProfile) { profile.ExpirationDate = time.Now().Add(-time.Minute) },
+		"wrong target": func(profile *provisioningProfile) { profile.Platform = []string{"tvOS"} },
+		"enterprise":   func(profile *provisioningProfile) { profile.ProvisionsAllDevices = true },
+		"debuggable":   func(profile *provisioningProfile) { profile.Entitlements["get-task-allow"] = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			profile := valid
+			profile.Platform = append([]string(nil), valid.Platform...)
+			profile.DeveloperCertificates = append([][]byte(nil), valid.DeveloperCertificates...)
+			profile.ProvisionedDevices = append([]string(nil), valid.ProvisionedDevices...)
+			profile.Entitlements = map[string]any{"get-task-allow": false}
+			mutate(&profile)
+			if err := validateDistributionProfile(&profile, ascAdHocProfileType); err == nil {
+				t.Fatal("unsafe ad hoc profile was accepted")
 			}
 		})
 	}
@@ -301,14 +343,14 @@ func TestSelectProvisioningProfileUsesExactBundleAndNewestUsableProfile(t *testi
 		profile("wrong-certificate", "com.example.app", now.Add(96*time.Hour), []byte("other")),
 		profile("selected", "com.example.app", now.Add(48*time.Hour), certificate),
 	}
-	selected, err := selectProvisioningProfile(candidates, "TEAM123456", "com.example.app", identity)
+	selected, err := selectProvisioningProfile(candidates, "TEAM123456", "com.example.app", identity, ascAppStoreProfileType)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if selected.profile.Name != "selected" {
 		t.Fatalf("selected profile = %q", selected.profile.Name)
 	}
-	if _, err := selectProvisioningProfile(candidates, "TEAM123456", "com.example.missing", identity); err == nil {
+	if _, err := selectProvisioningProfile(candidates, "TEAM123456", "com.example.missing", identity, ascAppStoreProfileType); err == nil {
 		t.Fatal("missing Bundle ID unexpectedly selected a profile")
 	}
 }

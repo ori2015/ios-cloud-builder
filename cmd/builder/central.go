@@ -55,6 +55,7 @@ func init() {
 	centralRegisterCmd.Flags().String("registry-file", "", "Mode-0600 local registry backup path")
 	centralDoctorCmd.Flags().StringP("remote", "r", "origin", "Private source git remote")
 	centralDoctorCmd.Flags().Bool("testflight", false, "Also verify apple-production metadata without reading secret values")
+	centralDoctorCmd.Flags().Bool("adhoc", false, "Also verify apple-production metadata for ad hoc signing, without reading secret values")
 }
 
 func runCentralSetup(cmd *cobra.Command, _ []string) error {
@@ -349,7 +350,11 @@ func runCentralDoctor(cmd *cobra.Command, _ []string) error {
 		ctx = context.Background()
 	}
 	testFlight, _ := cmd.Flags().GetBool("testflight")
-	if testFlight {
+	adHoc, _ := cmd.Flags().GetBool("adhoc")
+	// Both signed paths run in the same protected Environment and read the same
+	// Apple material, so they verify identically.
+	signingChecks := testFlight || adHoc
+	if signingChecks {
 		checks = append(checks,
 			check{"PACKAGING_RECIPIENT variable", func(ctx context.Context) error {
 				_, err := client.GetActionVariable(ctx, cfg.Builder.Owner, cfg.Builder.Repo, "PACKAGING_RECIPIENT")
@@ -404,8 +409,8 @@ func runCentralDoctor(cmd *cobra.Command, _ []string) error {
 			fmt.Printf("OK    %s\n", item.name)
 		}
 	}
-	if testFlight {
-		fmt.Println("Central builder and TestFlight Environment metadata are ready.")
+	if signingChecks {
+		fmt.Println("Central builder and protected signing Environment metadata are ready.")
 	} else {
 		fmt.Println("Central builder is ready.")
 	}

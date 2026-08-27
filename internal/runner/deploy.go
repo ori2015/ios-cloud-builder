@@ -35,6 +35,7 @@ const (
 
 var (
 	ErrDeployFailed = errors.New("private TestFlight deployment failed; download the encrypted diagnostic log")
+	ErrAdHocFailed  = errors.New("private ad hoc signing failed; download the encrypted diagnostic log")
 	appleIDPattern  = regexp.MustCompile(`^[A-Z0-9]{10}$`)
 	issuerPattern   = regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
 	identityPattern = regexp.MustCompile(`(?m)^\s*[0-9]+\)\s+([0-9A-Fa-f]{40})\s+"([^"\r\n]+)"`)
@@ -115,6 +116,148 @@ func ExecuteTestFlight(ctx context.Context, options *TestFlightOptions, recipien
 		return ErrDeployFailed
 	}
 	return nil
+}
+
+// AdHocOptions mirrors TestFlightOptions for the ad hoc path. The signed IPA is
+// encrypted to the calling project's own recipient — unlike TestFlight, where
+// the signed artifact never leaves the protected environment.
+type AdHocOptions struct {
+	EncryptedIPAPath string
+	ManifestPath     string
+	LogPath          string
+	Expected         ProvenanceExpectation
+}
+
+func (options *AdHocOptions) validate() error {
+	if options == nil || !filepath.IsAbs(options.EncryptedIPAPath) || !filepath.IsAbs(options.LogPath) {
+		return fmt.Errorf("ad hoc signing paths must be absolute")
+	}
+	if filepath.Base(options.EncryptedIPAPath) != trustedIPAFile || filepath.Base(options.ManifestPath) != provenanceFile ||
+		filepath.Base(options.LogPath) != "build.log" ||
+		filepath.Dir(options.EncryptedIPAPath) != filepath.Dir(options.ManifestPath) || options.Expected.validate() != nil {
+		return fmt.Errorf("invalid ad hoc signing paths")
+	}
+	return nil
+}
+
+// ExecuteAdHoc decrypts an authenticated unsigned IPA, signs it with an ad hoc
+// distribution profile without executing private project code, and re-encrypts
+// the signed IPA to the calling project's recipient so it can be installed
+// directly on registered devices.
+func ExecuteAdHoc(ctx context.Context, options *AdHocOptions, recipient, encryptedDir string) error {
+	if err := options.validate(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(options.LogPath), 0700); err != nil {
+		return fmt.Errorf("prepare private ad hoc output")
+	}
+	logFile, err := os.OpenFile(options.LogPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("prepare private ad hoc log")
+	}
+	manifest, provenanceErr := ValidateProvenanceArtifact(filepath.Dir(options.EncryptedIPAPath), options.Expected)
+	identity, identityErr := takeTransportIdentity()
+	signErr := provenanceErr
+	if signErr == nil {
+		signErr = identityErr
+	}
+	var signedIPA string
+	if signErr == nil {
+		signedIPA, signErr = signAdHoc(ctx, options, manifest, identity, logFile)
+	}
+	if signErr != nil {
+		_, _ = fmt.Fprintf(logFile, "\nAd hoc signing failed: %v\n", signErr)
+	}
+	_ = logFile.Sync()
+	_ = logFile.Close()
+	// Encrypts both to the caller and removes the plaintexts, exactly as the
+	// unsigned build path does — the difference is only that this IPA is signed.
+	if err := EncryptArtifacts(recipient, options.LogPath, signedIPA, encryptedDir); err != nil {
+		return fmt.Errorf("encrypt private ad hoc artifacts")
+	}
+	if signErr != nil {
+		return ErrAdHocFailed
+	}
+	return nil
+}
+
+func signAdHoc(ctx context.Context, options *AdHocOptions, manifest *ProvenanceManifest, identity age.Identity, privateLog io.Writer) (string, error) {
+	workRoot, err := os.MkdirTemp(filepath.Dir(options.LogPath), ".adhoc-")
+	if err != nil {
+		return "", fmt.Errorf("prepare ad hoc workspace")
+	}
+	privateHome := filepath.Join(workRoot, "home")
+	if err := os.Mkdir(privateHome, 0700); err != nil {
+		return "", fmt.Errorf("prepare isolated ad hoc home")
+	}
+	signingHome := strings.TrimSpace(os.Getenv("HOME"))
+	if !filepath.IsAbs(signingHome) {
+		return "", fmt.Errorf("prepare signing environment")
+	}
+	run := executor{ctx: ctx, env: ChildEnvironment(workRoot, signingHome), log: privateLog}
+
+	unsignedIPA := filepath.Join(workRoot, "unsigned.ipa")
+	if err := decryptFileBounded(identity, options.EncryptedIPAPath, unsignedIPA, maxDeployIPABytes); err != nil {
+		return "", err
+	}
+	if err := verifyPlaintextIPADigest(unsignedIPA, manifest); err != nil {
+		return "", fmt.Errorf("unsigned IPA does not match authenticated provenance")
+	}
+	payloadRoot := filepath.Join(workRoot, "unsigned")
+	appPath, err := extractUnsignedIPA(unsignedIPA, payloadRoot)
+	_ = os.Remove(unsignedIPA)
+	if err != nil {
+		return "", err
+	}
+	if err := rejectNestedApplications(appPath); err != nil {
+		return "", err
+	}
+	bundleID, _, err := readAppMetadata(filepath.Join(appPath, "Info.plist"))
+	if err != nil {
+		return "", err
+	}
+	credentials, err := takeAppleCredentials()
+	if err != nil {
+		return "", err
+	}
+
+	secretsDir := filepath.Join(workRoot, "credentials")
+	if err := os.Mkdir(secretsDir, 0700); err != nil {
+		return "", fmt.Errorf("prepare credential files")
+	}
+	p12Path := filepath.Join(secretsDir, "distribution.p12")
+	if err := writeBase64Secret(credentials.p12, p12Path); err != nil {
+		return "", fmt.Errorf("decode distribution certificate")
+	}
+	if err := signApplicationInPlace(ctx, &signRequest{
+		run:         run,
+		workRoot:    workRoot,
+		secretsDir:  secretsDir,
+		privateHome: privateHome,
+		appPath:     appPath,
+		bundleID:    bundleID,
+		p12Path:     p12Path,
+		profileType: ascAdHocProfileType,
+		credentials: credentials,
+		privateLog:  privateLog,
+	}); err != nil {
+		return "", err
+	}
+
+	// Written outside workRoot: the caller encrypts it after this returns, and
+	// the workspace is removed as soon as signing finishes.
+	signedIPA := filepath.Join(filepath.Dir(options.LogPath), "App.ipa")
+	if err := run.run(payloadRoot, "/usr/bin/ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", "Payload", signedIPA); err != nil {
+		_ = os.RemoveAll(workRoot)
+		return "", err
+	}
+	_ = os.RemoveAll(workRoot)
+	info, err := os.Stat(signedIPA)
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		return "", fmt.Errorf("signed IPA packaging produced no output")
+	}
+	_, _ = fmt.Fprintf(privateLog, "Signed ad hoc IPA for %s (%d bytes).\n", bundleID, info.Size())
+	return signedIPA, nil
 }
 
 func (options *TestFlightOptions) validate() error {
@@ -251,116 +394,19 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 		return fmt.Errorf("decode App Store Connect key")
 	}
 
-	keychainPath := filepath.Join(workRoot, "signing.keychain-db")
-	keychainPassword, err := randomPassword()
-	if err != nil {
-		return fmt.Errorf("create temporary keychain password")
-	}
-	defer func() { _ = run.runSensitive(workRoot, "/usr/bin/security", "delete-keychain", keychainPath) }()
-	if err := run.runSensitive(workRoot, "/usr/bin/security", "create-keychain", "-p", keychainPassword, keychainPath); err != nil {
-		return err
-	}
-	if err := run.runSensitive(workRoot, "/usr/bin/security", "set-keychain-settings", "-lut", "21600", keychainPath); err != nil {
-		return err
-	}
-	if err := run.runSensitive(workRoot, "/usr/bin/security", "unlock-keychain", "-p", keychainPassword, keychainPath); err != nil {
-		return err
-	}
-	if err := run.runSensitive(workRoot, "/usr/bin/security", "import", p12Path, "-P", credentials.p12Password,
-		"-T", "/usr/bin/codesign", "-t", "cert", "-f", "pkcs12", "-k", keychainPath); err != nil {
-		return err
-	}
-	if err := run.runSensitive(workRoot, "/usr/bin/security", "set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", keychainPassword, keychainPath); err != nil {
-		return err
-	}
-	if err := run.runSensitive(workRoot, "/usr/bin/security", "list-keychains", "-d", "user", "-s", keychainPath); err != nil {
-		return err
-	}
-	// Keep code-signing identity discovery scoped to the disposable keychain.
-	identityOutput, err := run.capture(workRoot, "/usr/bin/security", "find-identity", "-v", "-p", "codesigning", keychainPath)
-	if err != nil {
-		return err
-	}
-	identityMatch := identityPattern.FindStringSubmatch(string(identityOutput))
-	if len(identityMatch) != 3 || !strings.HasPrefix(identityMatch[2], "Apple Distribution: ") ||
-		!strings.HasSuffix(identityMatch[2], "("+credentials.teamID+")") {
-		return fmt.Errorf("distribution signing identity was not imported")
-	}
-	identityFingerprint, signingIdentity := identityMatch[1], identityMatch[2]
-
-	profilePaths, err := materializeProvisioningProfiles(credentials.profile, credentials.profiles, secretsDir)
-	if err != nil {
-		return err
-	}
-	var bundleResourceID string
-	if credentials.issuerID != "" {
-		if publisher == nil {
-			publisher, err = newAppStoreConnectClient(credentials.apiKeyID, credentials.issuerID, credentials.apiKey)
-			if err != nil {
-				return err
-			}
-		}
-		var downloaded []string
-		bundleResourceID, downloaded, err = downloadASCProvisioningProfiles(ctx, publisher, bundleID, secretsDir)
-		if err != nil {
-			if len(profilePaths) == 0 {
-				return err
-			}
-			_, _ = fmt.Fprintf(privateLog, "App Store Connect profile discovery failed: %v\nTrying protected fallback profiles.\n", err)
-		} else {
-			profilePaths = append(profilePaths, downloaded...)
-		}
-	}
-
-	candidates := make([]provisioningProfileCandidate, 0, len(profilePaths))
-	for _, candidatePath := range profilePaths {
-		profileOutput, captureErr := run.capture(workRoot, "/usr/bin/security", "cms", "-D", "-i", candidatePath, "-k", keychainPath)
-		if captureErr != nil {
-			return captureErr
-		}
-		var candidate provisioningProfile
-		if _, unmarshalErr := plist.Unmarshal(profileOutput, &candidate); unmarshalErr != nil {
-			return fmt.Errorf("parse provisioning profile bundle")
-		}
-		candidates = append(candidates, provisioningProfileCandidate{path: candidatePath, profile: candidate})
-	}
-	selected, selectionErr := selectProvisioningProfile(candidates, credentials.teamID, bundleID, identityFingerprint)
-	if selectionErr != nil && publisher != nil && bundleResourceID != "" {
-		createdPath, createErr := createASCProvisioningProfile(ctx, publisher, bundleResourceID, bundleID, identityFingerprint, secretsDir)
-		if createErr != nil {
-			return createErr
-		}
-		profileOutput, captureErr := run.capture(workRoot, "/usr/bin/security", "cms", "-D", "-i", createdPath, "-k", keychainPath)
-		if captureErr != nil {
-			return captureErr
-		}
-		var created provisioningProfile
-		if _, unmarshalErr := plist.Unmarshal(profileOutput, &created); unmarshalErr != nil {
-			return fmt.Errorf("parse App Store Connect provisioning profile")
-		}
-		candidates = append(candidates, provisioningProfileCandidate{path: createdPath, profile: created})
-		selected, selectionErr = selectProvisioningProfile(candidates, credentials.teamID, bundleID, identityFingerprint)
-		if selectionErr == nil {
-			_, _ = fmt.Fprintln(privateLog, "Created an App Store provisioning profile through the App Store Connect API.")
-		}
-	}
-	if selectionErr != nil {
-		return selectionErr
-	}
-	profilePath, profile := selected.path, selected.profile
-	installedProfile := filepath.Join(privateHome, "Library", "MobileDevice", "Provisioning Profiles", profile.UUID+".mobileprovision")
-	if err := copyPrivateFile(profilePath, installedProfile); err != nil {
-		return fmt.Errorf("install provisioning profile")
-	}
-	if err := copyPrivateFile(profilePath, filepath.Join(appPath, "embedded.mobileprovision")); err != nil {
-		return fmt.Errorf("embed provisioning profile")
-	}
-	entitlementsPath := filepath.Join(secretsDir, "entitlements.plist")
-	entitlements, err := plist.Marshal(profile.Entitlements, plist.XMLFormat)
-	if err != nil || os.WriteFile(entitlementsPath, entitlements, 0600) != nil {
-		return fmt.Errorf("prepare signing entitlements")
-	}
-	if err := signApplication(run, appPath, signingIdentity, entitlementsPath, keychainPath); err != nil {
+	if err := signApplicationInPlace(ctx, &signRequest{
+		run:         run,
+		workRoot:    workRoot,
+		secretsDir:  secretsDir,
+		privateHome: privateHome,
+		appPath:     appPath,
+		bundleID:    bundleID,
+		p12Path:     p12Path,
+		profileType: ascAppStoreProfileType,
+		credentials: credentials,
+		publisher:   publisher,
+		privateLog:  privateLog,
+	}); err != nil {
 		return err
 	}
 
@@ -406,6 +452,149 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 		}
 	}
 	return nil
+}
+
+// signRequest carries everything the shared signing step needs. It exists so
+// TestFlight and ad hoc signing cannot drift apart: both import the same
+// identity into the same kind of disposable keychain and both pick a profile
+// through the same validated selection, differing only in profileType.
+type signRequest struct {
+	run         executor
+	workRoot    string
+	secretsDir  string
+	privateHome string
+	appPath     string
+	bundleID    string
+	p12Path     string
+	profileType string
+	credentials *appleCredentials
+	publisher   *appStoreConnectClient
+	privateLog  io.Writer
+}
+
+// signApplicationInPlace imports the distribution identity, selects or creates a
+// matching provisioning profile, embeds it, and code-signs the application at
+// req.appPath. The keychain is destroyed before it returns.
+func signApplicationInPlace(ctx context.Context, req *signRequest) error {
+	run, workRoot, credentials := req.run, req.workRoot, req.credentials
+	keychainPath := filepath.Join(workRoot, "signing.keychain-db")
+	keychainPassword, err := randomPassword()
+	if err != nil {
+		return fmt.Errorf("create temporary keychain password")
+	}
+	defer func() { _ = run.runSensitive(workRoot, "/usr/bin/security", "delete-keychain", keychainPath) }()
+	if err := run.runSensitive(workRoot, "/usr/bin/security", "create-keychain", "-p", keychainPassword, keychainPath); err != nil {
+		return err
+	}
+	if err := run.runSensitive(workRoot, "/usr/bin/security", "set-keychain-settings", "-lut", "21600", keychainPath); err != nil {
+		return err
+	}
+	if err := run.runSensitive(workRoot, "/usr/bin/security", "unlock-keychain", "-p", keychainPassword, keychainPath); err != nil {
+		return err
+	}
+	if err := run.runSensitive(workRoot, "/usr/bin/security", "import", req.p12Path, "-P", credentials.p12Password,
+		"-T", "/usr/bin/codesign", "-t", "cert", "-f", "pkcs12", "-k", keychainPath); err != nil {
+		return err
+	}
+	if err := run.runSensitive(workRoot, "/usr/bin/security", "set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", keychainPassword, keychainPath); err != nil {
+		return err
+	}
+	if err := run.runSensitive(workRoot, "/usr/bin/security", "list-keychains", "-d", "user", "-s", keychainPath); err != nil {
+		return err
+	}
+	// Keep code-signing identity discovery scoped to the disposable keychain.
+	identityOutput, err := run.capture(workRoot, "/usr/bin/security", "find-identity", "-v", "-p", "codesigning", keychainPath)
+	if err != nil {
+		return err
+	}
+	identityMatch := identityPattern.FindStringSubmatch(string(identityOutput))
+	if len(identityMatch) != 3 || !strings.HasPrefix(identityMatch[2], "Apple Distribution: ") ||
+		!strings.HasSuffix(identityMatch[2], "("+credentials.teamID+")") {
+		return fmt.Errorf("distribution signing identity was not imported")
+	}
+	identityFingerprint, signingIdentity := identityMatch[1], identityMatch[2]
+
+	profilePaths, err := materializeProvisioningProfiles(credentials.profile, credentials.profiles, req.secretsDir)
+	if err != nil {
+		return err
+	}
+	publisher := req.publisher
+	var bundleResourceID string
+	if credentials.issuerID != "" {
+		if publisher == nil {
+			publisher, err = newAppStoreConnectClient(credentials.apiKeyID, credentials.issuerID, credentials.apiKey)
+			if err != nil {
+				return err
+			}
+		}
+		var downloaded []string
+		bundleResourceID, downloaded, err = downloadASCProvisioningProfiles(ctx, publisher, req.bundleID, req.secretsDir, req.profileType)
+		if err != nil {
+			if len(profilePaths) == 0 {
+				return err
+			}
+			_, _ = fmt.Fprintf(req.privateLog, "App Store Connect profile discovery failed: %v\nTrying protected fallback profiles.\n", err)
+		} else {
+			profilePaths = append(profilePaths, downloaded...)
+		}
+	}
+
+	parseCandidate := func(candidatePath string) (provisioningProfileCandidate, error) {
+		profileOutput, captureErr := run.capture(workRoot, "/usr/bin/security", "cms", "-D", "-i", candidatePath, "-k", keychainPath)
+		if captureErr != nil {
+			return provisioningProfileCandidate{}, captureErr
+		}
+		var parsed provisioningProfile
+		if _, unmarshalErr := plist.Unmarshal(profileOutput, &parsed); unmarshalErr != nil {
+			return provisioningProfileCandidate{}, fmt.Errorf("parse provisioning profile bundle")
+		}
+		return provisioningProfileCandidate{path: candidatePath, profile: parsed}, nil
+	}
+
+	candidates := make([]provisioningProfileCandidate, 0, len(profilePaths))
+	for _, candidatePath := range profilePaths {
+		candidate, parseErr := parseCandidate(candidatePath)
+		if parseErr != nil {
+			return parseErr
+		}
+		candidates = append(candidates, candidate)
+	}
+	selected, selectionErr := selectProvisioningProfile(candidates, credentials.teamID, req.bundleID, identityFingerprint, req.profileType)
+	if selectionErr != nil && publisher != nil && bundleResourceID != "" {
+		createdPath, createErr := createASCProvisioningProfile(ctx, publisher, bundleResourceID, req.bundleID, identityFingerprint, req.secretsDir, req.profileType)
+		if createErr != nil {
+			return createErr
+		}
+		created, parseErr := parseCandidate(createdPath)
+		if parseErr != nil {
+			return parseErr
+		}
+		candidates = append(candidates, created)
+		selected, selectionErr = selectProvisioningProfile(candidates, credentials.teamID, req.bundleID, identityFingerprint, req.profileType)
+		if selectionErr == nil {
+			_, _ = fmt.Fprintf(req.privateLog, "Created a %s provisioning profile through the App Store Connect API.\n", req.profileType)
+		}
+	}
+	if selectionErr != nil {
+		return selectionErr
+	}
+	profilePath, profile := selected.path, selected.profile
+	if req.profileType == ascAdHocProfileType {
+		_, _ = fmt.Fprintf(req.privateLog, "Ad hoc profile %q provisions %d device(s).\n", profile.Name, len(profile.ProvisionedDevices))
+	}
+	installedProfile := filepath.Join(req.privateHome, "Library", "MobileDevice", "Provisioning Profiles", profile.UUID+".mobileprovision")
+	if err := copyPrivateFile(profilePath, installedProfile); err != nil {
+		return fmt.Errorf("install provisioning profile")
+	}
+	if err := copyPrivateFile(profilePath, filepath.Join(req.appPath, "embedded.mobileprovision")); err != nil {
+		return fmt.Errorf("embed provisioning profile")
+	}
+	entitlementsPath := filepath.Join(req.secretsDir, "entitlements.plist")
+	entitlements, err := plist.Marshal(profile.Entitlements, plist.XMLFormat)
+	if err != nil || os.WriteFile(entitlementsPath, entitlements, 0600) != nil {
+		return fmt.Errorf("prepare signing entitlements")
+	}
+	return signApplication(run, req.appPath, signingIdentity, entitlementsPath, keychainPath)
 }
 
 func (e executor) runSensitive(dir, program string, args ...string) error {
@@ -689,7 +878,7 @@ func materializeProvisioningProfiles(singleProfile, profileBundle, destinationDi
 	return paths, nil
 }
 
-func selectProvisioningProfile(candidates []provisioningProfileCandidate, teamID, bundleID, identityFingerprint string) (provisioningProfileCandidate, error) {
+func selectProvisioningProfile(candidates []provisioningProfileCandidate, teamID, bundleID, identityFingerprint, profileType string) (provisioningProfileCandidate, error) {
 	var matching []provisioningProfileCandidate
 	for index := range candidates {
 		candidate := &candidates[index]
@@ -713,7 +902,7 @@ func selectProvisioningProfile(candidates []provisioningProfileCandidate, teamID
 	})
 	for index := range matching {
 		candidate := &matching[index]
-		if validateAppStoreProfile(&candidate.profile) == nil &&
+		if validateDistributionProfile(&candidate.profile, profileType) == nil &&
 			profileAuthorizesIdentity(candidate.profile.DeveloperCertificates, identityFingerprint) {
 			return *candidate, nil
 		}
@@ -721,7 +910,7 @@ func selectProvisioningProfile(candidates []provisioningProfileCandidate, teamID
 	return provisioningProfileCandidate{}, fmt.Errorf("no current matching provisioning profile authorizes the distribution certificate")
 }
 
-func validateAppStoreProfile(profile *provisioningProfile) error {
+func validateDistributionProfile(profile *provisioningProfile, profileType string) error {
 	if profile.ExpirationDate.IsZero() || !profile.ExpirationDate.After(time.Now().Add(5*time.Minute)) {
 		return fmt.Errorf("provisioning profile is expired or near expiry")
 	}
@@ -731,8 +920,22 @@ func validateAppStoreProfile(profile *provisioningProfile) error {
 			supportsIOS = true
 		}
 	}
-	if !supportsIOS || len(profile.DeveloperCertificates) != 1 || len(profile.ProvisionedDevices) != 0 || profile.ProvisionsAllDevices {
-		return fmt.Errorf("provisioning profile is not an App Store iOS distribution profile")
+	if !supportsIOS || len(profile.DeveloperCertificates) != 1 || profile.ProvisionsAllDevices {
+		return fmt.Errorf("provisioning profile is not an iOS distribution profile")
+	}
+	// The device list is what separates the two distribution profile kinds: an
+	// App Store profile names none, an ad hoc profile names exactly the devices
+	// it may install onto. Accepting the wrong one here would produce an IPA
+	// that silently refuses to install.
+	switch profileType {
+	case ascAdHocProfileType:
+		if len(profile.ProvisionedDevices) == 0 {
+			return fmt.Errorf("provisioning profile is not an ad hoc iOS distribution profile")
+		}
+	default:
+		if len(profile.ProvisionedDevices) != 0 {
+			return fmt.Errorf("provisioning profile is not an App Store iOS distribution profile")
+		}
 	}
 	if getTaskAllow, ok := profile.Entitlements["get-task-allow"]; ok && getTaskAllow != false {
 		return fmt.Errorf("provisioning profile allows debugging")

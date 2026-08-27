@@ -133,12 +133,50 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 			t.Errorf("Apple secret %q is available before provenance verification", forbidden)
 		}
 	}
+	adhocMarker := "  sign-adhoc:"
+	adhocIndex := strings.Index(text, adhocMarker)
+	if adhocIndex < 0 || adhocIndex >= deployIndex {
+		t.Fatal("ad hoc signing job is missing or not isolated before the TestFlight job")
+	}
+	adhocJob := text[adhocIndex:deployIndex]
+	for _, required := range []string{
+		"environment: apple-production", "verify-provenance", "sign-adhoc",
+		"ios-builder-adhoc-${{ inputs.build_id }}", "retention-days: 1",
+	} {
+		if !strings.Contains(adhocJob, required) {
+			t.Errorf("ad hoc signing job missing %q", required)
+		}
+	}
+	// The ad hoc job hands back the signed IPA by design, so the artifact checks
+	// that apply to the TestFlight job cannot apply here. It must still never see
+	// private source, nor the App credentials that could reach it.
+	for _, forbidden := range []string{
+		"path: source", "APP_PRIVATE_KEY", "source-token", "source_owner", "source_repo",
+	} {
+		if strings.Contains(adhocJob, forbidden) {
+			t.Errorf("ad hoc signing job contains forbidden text %q", forbidden)
+		}
+	}
+	adhocSignIndex := strings.Index(adhocJob, "      - name: Sign for ad hoc installation")
+	adhocProvenanceIndex := strings.Index(adhocJob, "      - name: Verify provenance before loading Apple credentials")
+	if adhocProvenanceIndex < 0 || adhocSignIndex < 0 || adhocProvenanceIndex >= adhocSignIndex {
+		t.Fatal("ad hoc provenance verification does not precede the Apple-secret step")
+	}
+	for _, forbidden := range []string{
+		"secrets.APPLE_SIGNING_AGE_IDENTITY", "secrets.APPLE_DISTRIBUTION_P12",
+		"secrets.ASC_API_KEY_P8", "secrets.ASC_KEY_ID", "secrets.ASC_ISSUER_ID",
+	} {
+		if strings.Contains(adhocJob[:adhocSignIndex], forbidden) {
+			t.Errorf("Apple secret %q is available before ad hoc provenance verification", forbidden)
+		}
+	}
+
 	packageMarker := "  trusted-package:"
 	packageIndex := strings.Index(text, packageMarker)
-	if packageIndex < 0 || packageIndex >= deployIndex {
+	if packageIndex < 0 || packageIndex >= adhocIndex {
 		t.Fatal("isolated trusted packaging job is missing")
 	}
-	packageJob := text[packageIndex:deployIndex]
+	packageJob := text[packageIndex:adhocIndex]
 	if strings.Contains(packageJob, "path: source") || strings.Contains(packageJob, "APP_PRIVATE_KEY") {
 		t.Fatal("trusted packaging job can access private source credentials or checkout")
 	}

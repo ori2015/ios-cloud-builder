@@ -97,6 +97,7 @@ type BuildOptions struct {
 	Timeout    time.Duration
 	Unsigned   bool   // Skip code signing even if configured
 	TestFlight bool   // Sign and upload through the protected central environment
+	AdHoc      bool   // Sign for ad hoc installation and return the signed IPA
 	Remote     string // Git remote to push the working-tree snapshot to
 }
 
