@@ -47,6 +47,8 @@ func run(args []string) error {
 		return encryptDiagnostic(args[1:])
 	case "deploy-testflight":
 		return deployTestFlight(args[1:])
+	case "sign-adhoc":
+		return signAdHoc(args[1:])
 	default:
 		return fmt.Errorf("unknown builder-runner subcommand")
 	}
@@ -167,6 +169,37 @@ func deployTestFlight(args []string) error {
 		return fmt.Errorf("secure TestFlight deployment preparation failed")
 	}
 	fmt.Println("App Store Connect deployment completed; encrypted diagnostics are ready")
+	return nil
+}
+
+func signAdHoc(args []string) error {
+	flags := newFlags("sign-adhoc")
+	var options runner.AdHocOptions
+	var recipient, outputDir string
+	flags.StringVar(&options.EncryptedIPAPath, "encrypted-ipa", "", "")
+	flags.StringVar(&options.ManifestPath, "manifest", "", "")
+	flags.StringVar(&options.LogPath, "log", "", "")
+	flags.StringVar(&options.Expected.BuildID, "build-id", "", "")
+	flags.StringVar(&options.Expected.ProjectID, "project-id", "", "")
+	flags.StringVar(&options.Expected.BuilderCommit, "builder-commit", "", "")
+	flags.StringVar(&options.Expected.WorkflowRef, "workflow-ref", "", "")
+	flags.StringVar(&recipient, "recipient", "", "")
+	flags.StringVar(&outputDir, "output", "", "")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		return fmt.Errorf("invalid ad hoc signing arguments")
+	}
+	fmt.Println("Signing iOS application for ad hoc installation; detailed output is private")
+	// Bounded well under the job timeout: signing has no network upload, so it
+	// needs far less headroom than the TestFlight path.
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
+	defer cancel()
+	if err := runner.ExecuteAdHoc(ctx, &options, recipient, outputDir); err != nil {
+		if err == runner.ErrAdHocFailed {
+			return runner.ErrAdHocFailed
+		}
+		return fmt.Errorf("secure ad hoc signing preparation failed")
+	}
+	fmt.Println("Ad hoc signing completed; encrypted signed IPA is ready")
 	return nil
 }
 

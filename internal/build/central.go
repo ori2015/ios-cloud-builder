@@ -28,6 +28,7 @@ const (
 	centralArtifactPrefix = "ios-builder-"
 	centralDeployPrefix   = "ios-builder-deploy-"
 	centralTrustedPrefix  = "ios-builder-trusted-"
+	centralAdHocPrefix    = "ios-builder-adhoc-"
 	centralIPAFile        = "App.ipa.age"
 	centralLogFile        = "build.log.age"
 	centralProjectFile    = "project-output.age"
@@ -86,7 +87,7 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 
 	owner, repo, workflow := c.config.Builder.Owner, c.config.Builder.Repo, c.config.Builder.Workflow
 	c.progress.Update(PhaseTriggering, "Triggering central GitHub Actions build...")
-	if err := c.github.TriggerWorkflow(ctx, owner, repo, workflow, centralDispatchInputs(c.config, buildID, opts.TestFlight)); err != nil {
+	if err := c.github.TriggerWorkflow(ctx, owner, repo, workflow, centralDispatchInputs(c.config, buildID, opts.TestFlight, opts.AdHoc)); err != nil {
 		c.progress.Error(PhaseTriggering, err)
 		return result, fmt.Errorf("failed to trigger central workflow: %w", err)
 	}
@@ -134,21 +135,29 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 		return result, fmt.Errorf("encrypted build artifact unavailable: %w", err)
 	}
 	defer c.deleteCentralArtifact(owner, repo, baseArtifact.ID)
-	if opts.TestFlight {
+	signedFlow := opts.TestFlight || opts.AdHoc
+	if signedFlow {
 		if trustedArtifact, findErr := c.github.FindArtifactByName(ctx, owner, repo, run.ID, centralTrustedPrefix+buildID); findErr == nil {
 			defer c.deleteCentralArtifact(owner, repo, trustedArtifact.ID)
 		}
 	}
 	artifact := baseArtifact
-	if opts.TestFlight {
-		deployName := centralDeployPrefix + buildID
+	if signedFlow {
+		// The signing job publishes its own artifact; the unsigned build one only
+		// carries diagnostics from before signing started.
+		resultName := centralDeployPrefix + buildID
+		kind := "TestFlight diagnostic"
+		if opts.AdHoc {
+			resultName = centralAdHocPrefix + buildID
+			kind = "ad hoc artifact"
+		}
 		if run.Conclusion == "success" {
-			artifact, err = c.github.PollForRunArtifact(ctx, owner, repo, run.ID, deployName, artifactIndexTimeout)
+			artifact, err = c.github.PollForRunArtifact(ctx, owner, repo, run.ID, resultName, artifactIndexTimeout)
 			if err != nil {
-				return result, fmt.Errorf("encrypted TestFlight diagnostic unavailable: %w", err)
+				return result, fmt.Errorf("encrypted %s unavailable: %w", kind, err)
 			}
-		} else if deployArtifact, findErr := c.github.FindArtifactByName(ctx, owner, repo, run.ID, deployName); findErr == nil {
-			artifact = deployArtifact
+		} else if resultArtifact, findErr := c.github.FindArtifactByName(ctx, owner, repo, run.ID, resultName); findErr == nil {
+			artifact = resultArtifact
 		}
 		if artifact.ID != baseArtifact.ID {
 			defer c.deleteCentralArtifact(owner, repo, artifact.ID)
@@ -172,8 +181,11 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 		result.Duration = time.Since(started)
 		c.progress.Error(PhaseBuilding, fmt.Errorf("workflow concluded %s", run.Conclusion))
 		kind := "build"
-		if opts.TestFlight {
+		switch {
+		case opts.TestFlight:
 			kind = "TestFlight deployment"
+		case opts.AdHoc:
+			kind = "ad hoc signing"
 		}
 		return result, fmt.Errorf("%s failed with conclusion %s; decrypted diagnostics: %s", kind, run.Conclusion, logPath)
 	}
@@ -206,7 +218,11 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 	result.IPAPath = ipaPath
 	result.IPASize = int64(len(plaintextIPA))
 	result.Duration = time.Since(started)
-	c.progress.Complete(PhaseBuilding, "Build completed successfully")
+	if opts.AdHoc {
+		c.progress.Complete(PhaseBuilding, "Signed ad hoc build completed")
+	} else {
+		c.progress.Complete(PhaseBuilding, "Build completed successfully")
+	}
 	c.progress.Complete(PhaseDownloading, fmt.Sprintf("IPA decrypted (%.2f MB)", float64(result.IPASize)/(1024*1024)))
 	c.progress.Finish()
 	return result, nil
@@ -269,17 +285,20 @@ func centralIdentity(cfg *config.Config) (*age.X25519Identity, error) {
 	return identity, nil
 }
 
-func centralDispatchInputs(cfg *config.Config, buildID string, testFlight bool) map[string]string {
-	inputs := map[string]string{
+func centralDispatchInputs(cfg *config.Config, buildID string, testFlight, adHoc bool) map[string]string {
+	operation := "build"
+	switch {
+	case testFlight:
+		operation = "testflight"
+	case adHoc:
+		operation = "adhoc"
+	}
+	return map[string]string{
 		"build_id":           buildID,
 		"project_id":         cfg.ProjectID,
 		"artifact_recipient": strings.TrimSpace(cfg.Security.Recipient),
-		"operation":          "build",
+		"operation":          operation,
 	}
-	if testFlight {
-		inputs["operation"] = "testflight"
-	}
-	return inputs
 }
 
 func (c *Coordinator) downloadCentralArtifact(ctx context.Context, owner, repo string, artifact *github.Artifact) (*encryptedArtifact, error) {

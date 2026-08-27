@@ -26,6 +26,15 @@ const (
 	FrameworkIonic       = "ionic"
 )
 
+// Operations accepted from workflow_dispatch. Only OperationBuild leaves the
+// application unsigned; the other two sign in the protected Apple environment
+// and differ in where the signed application goes.
+const (
+	OperationBuild      = "build"
+	OperationTestFlight = "testflight"
+	OperationAdHoc      = "adhoc"
+)
+
 var (
 	buildIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 	schemePattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._+()-]{0,127}$`)
@@ -52,7 +61,7 @@ func (in *Inputs) Validate() error {
 	if err != nil || recipient.String() != in.ArtifactRecipient {
 		return fmt.Errorf("invalid artifact_recipient")
 	}
-	if in.Operation != "build" && in.Operation != "testflight" {
+	if in.Operation != OperationBuild && in.Operation != OperationTestFlight && in.Operation != OperationAdHoc {
 		return fmt.Errorf("invalid operation")
 	}
 	return nil
@@ -87,7 +96,7 @@ func ResolveProject(in *Inputs, registryJSON, outputPath string, commands io.Wri
 	}
 	defer output.Close()
 	configuration := project.Configuration
-	if in.Operation == "testflight" {
+	if in.Operation == OperationTestFlight || in.Operation == OperationAdHoc {
 		configuration = "Release"
 	}
 	values := map[string]string{

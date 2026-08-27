@@ -17,13 +17,14 @@ on:
         required: true
         type: string
       operation:
-        description: Unsigned local build or protected TestFlight deployment
+        description: Unsigned local build, protected TestFlight deployment, or signed ad hoc IPA
         required: true
         default: build
         type: choice
         options:
           - build
           - testflight
+          - adhoc
 
 permissions:
   contents: read
@@ -149,13 +150,13 @@ jobs:
           CONFIGURATION: ${{ steps.project.outputs.configuration }}
           FRAMEWORK: ${{ steps.detect.outputs.framework }}
           ARTIFACT_RECIPIENT: ${{ inputs.artifact_recipient }}
-          IPA_RECIPIENT: ${{ inputs.operation == 'testflight' && vars.PACKAGING_RECIPIENT || inputs.artifact_recipient }}
+          IPA_RECIPIENT: ${{ inputs.operation != 'build' && vars.PACKAGING_RECIPIENT || inputs.artifact_recipient }}
           OPERATION: ${{ inputs.operation }}
           CODE_SIGNING_ALLOWED: 'NO'
           CODE_SIGNING_REQUIRED: 'NO'
         run: |
           intermediate=()
-          if [ "$OPERATION" = "testflight" ]; then intermediate=(--project-intermediate); fi
+          if [ "$OPERATION" != "build" ]; then intermediate=(--project-intermediate); fi
           "$RUNNER_TEMP/builder-runner" execute \
             --source "$GITHUB_WORKSPACE/source" \
             --ios-path "$IOS_PATH" \
@@ -201,7 +202,7 @@ jobs:
           echo "Build succeeded. Encrypted artifacts uploaded."
 
   trusted-package:
-    if: inputs.operation == 'testflight'
+    if: inputs.operation == 'testflight' || inputs.operation == 'adhoc'
     needs: build
     runs-on: macos-15
     timeout-minutes: 15
@@ -315,6 +316,127 @@ jobs:
             exit 1
           fi
           echo "Authenticated TestFlight intermediate uploaded."
+
+  sign-adhoc:
+    if: inputs.operation == 'adhoc'
+    needs: trusted-package
+    environment: apple-production
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+
+    steps:
+      - name: Checkout trusted public builder only
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          path: builder
+          persist-credentials: false
+
+      - name: Set up trusted Go toolchain
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: builder/go.mod
+          cache: false
+
+      - name: Build trusted signing runner
+        working-directory: builder
+        run: |
+          go mod verify
+          go build -trimpath -o "$RUNNER_TEMP/builder-runner" ./cmd/builder-runner
+
+      - name: Download authenticated unsigned intermediate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ios-builder-trusted-${{ inputs.build_id }}
+          path: ${{ runner.temp }}/intermediate
+
+      - name: Verify provenance before loading Apple credentials
+        id: provenance
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          "$RUNNER_TEMP/builder-runner" verify-provenance \
+            --input "$RUNNER_TEMP/intermediate" \
+            --build-id "${{ inputs.build_id }}" \
+            --project-id "${{ inputs.project_id }}" \
+            --builder-commit "$GITHUB_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --repository "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ios-build.yml" \
+            --source-ref "$GITHUB_REF" \
+            --log "$RUNNER_TEMP/provenance-private/build.log"
+
+      # Unlike TestFlight, the signed application is the deliverable here, so it
+      # is encrypted to the calling project's own recipient and handed back.
+      - name: Sign for ad hoc installation
+        id: sign
+        if: steps.provenance.outcome == 'success'
+        continue-on-error: true
+        env:
+          APPLE_SIGNING_AGE_IDENTITY: ${{ secrets.APPLE_SIGNING_AGE_IDENTITY }}
+          APPLE_DISTRIBUTION_P12: ${{ secrets.APPLE_DISTRIBUTION_P12 }}
+          APPLE_DISTRIBUTION_P12_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_P12_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_ADHOC_PROVISIONING_PROFILE }}
+          APPLE_PROVISIONING_PROFILES: ${{ secrets.APPLE_ADHOC_PROVISIONING_PROFILES }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ARTIFACT_RECIPIENT: ${{ inputs.artifact_recipient }}
+        run: |
+          "$RUNNER_TEMP/builder-runner" sign-adhoc \
+            --encrypted-ipa "$RUNNER_TEMP/intermediate/App.ipa.age" \
+            --manifest "$RUNNER_TEMP/intermediate/provenance.json" \
+            --build-id "${{ inputs.build_id }}" \
+            --project-id "${{ inputs.project_id }}" \
+            --builder-commit "$GITHUB_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --log "$RUNNER_TEMP/adhoc-private/build.log" \
+            --recipient "$ARTIFACT_RECIPIENT" \
+            --output "$RUNNER_TEMP/adhoc-encrypted"
+
+      - name: Encrypt provenance rejection diagnostics
+        if: steps.provenance.outcome != 'success'
+        env:
+          ARTIFACT_RECIPIENT: ${{ inputs.artifact_recipient }}
+        run: |
+          "$RUNNER_TEMP/builder-runner" encrypt-diagnostic \
+            --log "$RUNNER_TEMP/provenance-private/build.log" \
+            --recipient "$ARTIFACT_RECIPIENT" \
+            --output "$RUNNER_TEMP/adhoc-encrypted"
+
+      - name: Upload encrypted ad hoc result only
+        id: adhoc-upload
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: ios-builder-adhoc-${{ inputs.build_id }}
+          path: |
+            ${{ runner.temp }}/adhoc-encrypted/build.log.age
+            ${{ runner.temp }}/adhoc-encrypted/App.ipa.age
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: false
+          compression-level: 0
+
+      - name: Report ad hoc signing status
+        if: always()
+        env:
+          SIGN_OUTCOME: ${{ steps.sign.outcome }}
+          PROVENANCE_OUTCOME: ${{ steps.provenance.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.adhoc-upload.outcome }}
+        run: |
+          if [ "$UPLOAD_OUTCOME" != "success" ]; then
+            echo "Encrypted ad hoc artifact upload failed."
+            exit 1
+          fi
+          if [ "$PROVENANCE_OUTCOME" != "success" ] || [ "$SIGN_OUTCOME" != "success" ]; then
+            echo "Ad hoc signing failed. Download the encrypted diagnostic log using Builder CLI."
+            exit 1
+          fi
+          echo "Ad hoc signing completed. The signed IPA is encrypted to the calling project."
 
   sign-and-deploy:
     if: inputs.operation == 'testflight'

@@ -641,6 +641,7 @@ func init() {
 	iosBuildCmd.Flags().Duration("timeout", 30*time.Minute, "Build timeout")
 	iosBuildCmd.Flags().Bool("unsigned", false, "Build unsigned IPA (skip code signing even if configured)")
 	iosBuildCmd.Flags().Bool("testflight", false, "Sign and upload through the protected central Environment")
+	iosBuildCmd.Flags().Bool("adhoc", false, "Sign for ad hoc installation on registered devices and return the signed IPA")
 	iosBuildCmd.Flags().StringP("remote", "r", "origin", "Git remote to push the working-tree snapshot to")
 	iosCmd.AddCommand(iosBuildCmd)
 	iosDeployCmd.Flags().StringP("output", "o", "dist", "Output directory for decrypted diagnostic logs")
@@ -669,12 +670,21 @@ func runIOSBuild(cmd *cobra.Command, args []string) error {
 	timeout, _ := cmd.Flags().GetDuration("timeout")
 	unsigned, _ := cmd.Flags().GetBool("unsigned")
 	testFlight, _ := cmd.Flags().GetBool("testflight")
+	adHoc, _ := cmd.Flags().GetBool("adhoc")
 	remote, _ := cmd.Flags().GetString("remote")
-	if unsigned && testFlight {
-		return fmt.Errorf("--unsigned and --testflight cannot be used together")
-	}
-	if testFlight && !cfg.IsCentral() {
-		return fmt.Errorf("--testflight requires backend=central; repository builds retain their existing signing behavior")
+	for _, conflict := range []struct {
+		when    bool
+		message string
+	}{
+		{unsigned && testFlight, "--unsigned and --testflight cannot be used together"},
+		{unsigned && adHoc, "--unsigned and --adhoc cannot be used together"},
+		{testFlight && adHoc, "--testflight and --adhoc cannot be used together"},
+		{testFlight && !cfg.IsCentral(), "--testflight requires backend=central; repository builds retain their existing signing behavior"},
+		{adHoc && !cfg.IsCentral(), "--adhoc requires backend=central; repository builds retain their existing signing behavior"},
+	} {
+		if conflict.when {
+			return fmt.Errorf("%s", conflict.message)
+		}
 	}
 
 	ctx := cmd.Context()
@@ -689,6 +699,7 @@ func runIOSBuild(cmd *cobra.Command, args []string) error {
 		Timeout:    timeout,
 		Unsigned:   unsigned,
 		TestFlight: testFlight,
+		AdHoc:      adHoc,
 		Remote:     remote,
 	})
 }

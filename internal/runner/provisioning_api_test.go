@@ -36,7 +36,7 @@ func TestDownloadASCProvisioningProfilesUsesExactBundle(t *testing.T) {
 	client, _ := testASCClient(t, server.Client())
 	client.baseURL = server.URL
 	destination := t.TempDir()
-	bundleResourceID, paths, err := downloadASCProvisioningProfiles(context.Background(), client, "com.example.app", destination)
+	bundleResourceID, paths, err := downloadASCProvisioningProfiles(context.Background(), client, "com.example.app", destination, ascAppStoreProfileType)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestCreateASCProvisioningProfileBindsExactCertificate(t *testing.T) {
 	defer server.Close()
 	client, _ := testASCClient(t, server.Client())
 	client.baseURL = server.URL
-	profilePath, err := createASCProvisioningProfile(context.Background(), client, "bundle1", "com.example.app", identity, t.TempDir())
+	profilePath, err := createASCProvisioningProfile(context.Background(), client, "bundle1", "com.example.app", identity, t.TempDir(), ascAppStoreProfileType)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -30,7 +30,7 @@ func TestCentralDispatchInputs(t *testing.T) {
 		"artifact_recipient": "age1example",
 		"operation":          "build",
 	}
-	if got := centralDispatchInputs(cfg, want["build_id"], false); !reflect.DeepEqual(got, want) {
+	if got := centralDispatchInputs(cfg, want["build_id"], false, false); !reflect.DeepEqual(got, want) {
 		t.Fatalf("centralDispatchInputs() = %#v, want %#v", got, want)
 	}
 }
@@ -113,8 +113,8 @@ func TestCentralDispatchInputsKeepRepositoriesIndependent(t *testing.T) {
 		ProjectID: "p_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		Security:  config.SecurityConfig{Recipient: "age1recipient-b"},
 	}
-	a := centralDispatchInputs(first, "550e8400-e29b-41d4-a716-446655440000", false)
-	b := centralDispatchInputs(second, "6ba7b810-9dad-41d1-80b4-00c04fd430c8", false)
+	a := centralDispatchInputs(first, "550e8400-e29b-41d4-a716-446655440000", false, false)
+	b := centralDispatchInputs(second, "6ba7b810-9dad-41d1-80b4-00c04fd430c8", false, false)
 	if a["project_id"] == b["project_id"] || a["build_id"] == b["build_id"] {
 		t.Fatalf("central dispatches were not isolated: %#v %#v", a, b)
 	}
@@ -132,9 +132,25 @@ func TestCentralTestFlightDispatchForcesRelease(t *testing.T) {
 		ProjectID: "p_0123456789abcdef0123456789abcdef",
 		Security:  config.SecurityConfig{Recipient: "age1recipient"},
 	}
-	got := centralDispatchInputs(cfg, "id", true)
+	got := centralDispatchInputs(cfg, "id", true, false)
 	if got["operation"] != "testflight" || len(got) != 4 {
 		t.Fatalf("TestFlight dispatch = %#v", got)
+	}
+}
+
+func TestCentralAdHocDispatchSelectsAdHocOperation(t *testing.T) {
+	cfg := &config.Config{
+		ProjectID: "p_0123456789abcdef0123456789abcdef",
+		Security:  config.SecurityConfig{Recipient: "age1recipient"},
+	}
+	got := centralDispatchInputs(cfg, "id", false, true)
+	if got["operation"] != "adhoc" || len(got) != 4 {
+		t.Fatalf("ad hoc dispatch = %#v", got)
+	}
+	// TestFlight is the stronger request and must win if both are somehow set,
+	// so an ad hoc flag can never downgrade a deployment into a returned IPA.
+	if both := centralDispatchInputs(cfg, "id", true, true); both["operation"] != "testflight" {
+		t.Fatalf("combined dispatch = %#v", both)
 	}
 }
 
