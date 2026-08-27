@@ -118,7 +118,7 @@ func TestTrustedPackageEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	plaintext := filepath.Join(t.TempDir(), "App.ipa")
-	if err := decryptFileBounded(signingIdentity, filepath.Join(outputDir, trustedIPAFile), plaintext, maxDeployIPABytes); err != nil {
+	if err := decryptFileBounded(signingIdentity, filepath.Join(outputDir, trustedIPAFile), plaintext); err != nil {
 		t.Fatal(err)
 	}
 	if err := verifyPlaintextIPADigest(plaintext, manifest); err != nil {

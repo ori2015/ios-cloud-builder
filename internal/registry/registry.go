@@ -99,10 +99,13 @@ func (r *Registry) Validate() error {
 	if r == nil || r.Version != SchemaVersion || r.Revision == 0 || len(r.Projects) == 0 || len(r.Projects) > maxProjects {
 		return errors.New("invalid project registry metadata")
 	}
-	for id, project := range r.Projects {
+	// Indexed rather than ranged over by value: Project is large enough that
+	// copying it per iteration is wasteful, and nothing here needs the copy.
+	for id := range r.Projects {
 		if !ProjectIDPattern.MatchString(id) {
 			return errors.New("project registry contains an invalid project ID")
 		}
+		project := r.Projects[id]
 		if err := project.Validate(); err != nil {
 			return fmt.Errorf("invalid project registry entry %s: %w", id, err)
 		}

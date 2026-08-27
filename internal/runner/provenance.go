@@ -107,7 +107,7 @@ func trustedPackageWithPackager(ctx context.Context, options *TrustedPackageOpti
 	}
 	defer func() { _ = os.RemoveAll(workRoot) }()
 	untrustedIPA := filepath.Join(workRoot, "project-output.ipa")
-	if err := decryptFileBounded(identity, filepath.Join(options.InputDir, projectOutputFile), untrustedIPA, maxDeployIPABytes); err != nil {
+	if err := decryptFileBounded(identity, filepath.Join(options.InputDir, projectOutputFile), untrustedIPA); err != nil {
 		return fmt.Errorf("decrypt project output: %w", err)
 	}
 	trustedRoot := filepath.Join(workRoot, "trusted-copy")

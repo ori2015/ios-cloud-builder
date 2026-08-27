@@ -197,7 +197,7 @@ func signAdHoc(ctx context.Context, options *AdHocOptions, manifest *ProvenanceM
 	run := executor{ctx: ctx, env: ChildEnvironment(workRoot, signingHome), log: privateLog}
 
 	unsignedIPA := filepath.Join(workRoot, "unsigned.ipa")
-	if err := decryptFileBounded(identity, options.EncryptedIPAPath, unsignedIPA, maxDeployIPABytes); err != nil {
+	if err := decryptFileBounded(identity, options.EncryptedIPAPath, unsignedIPA); err != nil {
 		return "", err
 	}
 	if err := verifyPlaintextIPADigest(unsignedIPA, manifest); err != nil {
@@ -333,7 +333,7 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 	uploadRun := executor{ctx: ctx, env: ChildEnvironment(workRoot, privateHome), log: privateLog}
 
 	unsignedIPA := filepath.Join(workRoot, "unsigned.ipa")
-	if err := decryptFileBounded(identity, options.EncryptedIPAPath, unsignedIPA, maxDeployIPABytes); err != nil {
+	if err := decryptFileBounded(identity, options.EncryptedIPAPath, unsignedIPA); err != nil {
 		return err
 	}
 	if err := verifyPlaintextIPADigest(unsignedIPA, manifest); err != nil {
@@ -607,7 +607,10 @@ func (e executor) runSensitive(dir, program string, args ...string) error {
 	return nil
 }
 
-func decryptFileBounded(identity age.Identity, sourcePath, destinationPath string, limit int64) error {
+// decryptFileBounded caps the plaintext at maxDeployIPABytes; every caller
+// decrypts an unsigned IPA, so the bound is the same for all of them.
+func decryptFileBounded(identity age.Identity, sourcePath, destinationPath string) error {
+	const limit = maxDeployIPABytes
 	source, err := os.Open(sourcePath)
 	if err != nil {
 		return fmt.Errorf("open encrypted unsigned IPA")
