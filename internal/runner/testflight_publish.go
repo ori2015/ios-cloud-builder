@@ -470,7 +470,7 @@ func waitForASCBuild(ctx context.Context, api *appStoreConnectClient, appID, ver
 			if reasons, rejectErr := findASCFailedBuildUpload(ctx, api, appID, version, buildNumber); rejectErr == nil && reasons != "" {
 				fmt.Printf("App Store Connect rejected the uploaded build:\n%s\n", reasons)
 				_, _ = fmt.Fprintf(privateLog, "App Store Connect rejected the uploaded build:\n%s\n", reasons)
-				return ascBuild{}, fmt.Errorf("App Store Connect rejected the uploaded build:\n%s", reasons)
+				return ascBuild{}, fmt.Errorf("upload rejected by App Store Connect:\n%s", reasons)
 			}
 		}
 		remaining := time.Until(deadline)
