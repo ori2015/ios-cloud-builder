@@ -462,6 +462,16 @@ func waitForASCBuild(ctx context.Context, api *appStoreConnectClient, appID, ver
 			case "INVALID", "FAILED":
 				return ascBuild{}, fmt.Errorf("uploaded build was processed by App Store Connect as %s", build.ProcessingState)
 			}
+		} else {
+			// A build that fails Apple's ingestion validation (missing usage
+			// descriptions, bad entitlements, etc.) never becomes a /v1/builds
+			// resource, so it would otherwise poll silently for the full
+			// betaProcessingTimeout with no indication of why.
+			if reasons, rejectErr := findASCFailedBuildUpload(ctx, api, appID, version, buildNumber); rejectErr == nil && reasons != "" {
+				fmt.Printf("App Store Connect rejected the uploaded build:\n%s\n", reasons)
+				_, _ = fmt.Fprintf(privateLog, "App Store Connect rejected the uploaded build:\n%s\n", reasons)
+				return ascBuild{}, fmt.Errorf("App Store Connect rejected the uploaded build:\n%s", reasons)
+			}
 		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -484,6 +494,47 @@ func waitForASCBuild(ctx context.Context, api *appStoreConnectClient, appID, ver
 		case <-timer.C:
 		}
 	}
+}
+
+// findASCFailedBuildUpload reports the App Store Connect rejection reason for
+// the exact uploaded version/build, if Apple has already finished validating
+// it and rejected it. A build that fails this early validation never becomes
+// a /v1/builds resource, so waitForASCBuild would otherwise poll silently
+// until betaProcessingTimeout with no indication of why.
+func findASCFailedBuildUpload(ctx context.Context, api *appStoreConnectClient, appID, version, buildNumber string) (string, error) {
+	query := url.Values{"limit": {"200"}}
+	var response ascListResponse
+	if err := api.request(ctx, http.MethodGet, "/v1/apps/"+url.PathEscape(appID)+"/buildUploads", query, nil, &response); err != nil {
+		return "", err
+	}
+	for _, resource := range response.Data {
+		var attributes struct {
+			CFBundleShortVersionString string `json:"cfBundleShortVersionString"`
+			CFBundleVersion            string `json:"cfBundleVersion"`
+			State                      struct {
+				State  string `json:"state"`
+				Errors []struct {
+					Code        string `json:"code"`
+					Description string `json:"description"`
+				} `json:"errors"`
+			} `json:"state"`
+		}
+		if json.Unmarshal(resource.Attributes, &attributes) != nil {
+			continue
+		}
+		if attributes.CFBundleShortVersionString != version || attributes.CFBundleVersion != buildNumber {
+			continue
+		}
+		if attributes.State.State != "FAILED" || len(attributes.State.Errors) == 0 {
+			continue
+		}
+		var reasons []string
+		for _, buildError := range attributes.State.Errors {
+			reasons = append(reasons, fmt.Sprintf("%s: %s", buildError.Code, buildError.Description))
+		}
+		return strings.Join(reasons, "\n"), nil
+	}
+	return "", nil
 }
 
 func findASCBuild(ctx context.Context, api *appStoreConnectClient, appID, version, buildNumber string) (ascBuild, bool, error) {

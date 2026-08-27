@@ -196,6 +196,31 @@ func TestNextASCBuildNumberStartsAtOne(t *testing.T) {
 	}
 }
 
+func TestWaitForASCBuildFailsFastOnRejectedBuildUpload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/builds":
+			writeASCJSON(w, `{"data":[]}`)
+		case "/v1/apps/app1/buildUploads":
+			writeASCJSON(w, `{"data":[{"type":"buildUploads","id":"u1","attributes":{
+				"cfBundleShortVersionString":"0.1.0","cfBundleVersion":"1",
+				"state":{"state":"FAILED","errors":[{"code":"90683","description":"Missing purpose string in Info.plist."}]}
+			}}]}`)
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client, _ := testASCClient(t, server.Client())
+	client.baseURL = server.URL
+
+	var privateLog bytes.Buffer
+	_, err := waitForASCBuild(t.Context(), client, "app1", "0.1.0", "1", &privateLog)
+	if err == nil || !strings.Contains(err.Error(), "90683") || !strings.Contains(err.Error(), "purpose string") {
+		t.Fatalf("waitForASCBuild() error = %v, want a fast failure containing Apple's rejection reason", err)
+	}
+}
+
 func testASCClient(t *testing.T, httpClient *http.Client) (*appStoreConnectClient, *ecdsa.PrivateKey) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
