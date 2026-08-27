@@ -53,6 +53,7 @@ func init() {
 	centralSetupCmd.Flags().String("project-id", "", "Existing opaque project ID (normally generated automatically)")
 	centralSetupCmd.Flags().String("snapshot-namespace", "", "Existing private snapshot namespace (normally generated automatically)")
 	centralRegisterCmd.Flags().String("registry-file", "", "Mode-0600 local registry backup path")
+	centralRegisterCmd.Flags().String("bundle-id", "", "Application identity this project may be signed as (required for --testflight and --adhoc)")
 	centralDoctorCmd.Flags().StringP("remote", "r", "origin", "Private source git remote")
 	centralDoctorCmd.Flags().Bool("testflight", false, "Also verify apple-production metadata without reading secret values")
 	centralDoctorCmd.Flags().Bool("adhoc", false, "Also verify apple-production metadata for ad hoc signing, without reading secret values")
@@ -158,6 +159,11 @@ func runCentralRegister(cmd *cobra.Command, _ []string) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	rawBundleID, _ := cmd.Flags().GetString("bundle-id")
+	bundleID := strings.TrimSpace(rawBundleID)
+	if bundleID != "" && !registry.BundleIDPattern.MatchString(bundleID) {
+		return errors.New("invalid --bundle-id")
+	}
 	registryPath, _ := cmd.Flags().GetString("registry-file")
 	if registryPath == "" {
 		registryPath, err = defaultRegistryPath(cfg.Builder.Owner, cfg.Builder.Repo)
@@ -192,7 +198,7 @@ func runCentralRegister(cmd *cobra.Command, _ []string) error {
 	}
 	cfg.GitHub.Owner, cfg.GitHub.Repo = canonical[0], canonical[1]
 	project := registry.Project{
-		Owner: cfg.GitHub.Owner, Repo: cfg.GitHub.Repo, IOSPath: iosPath,
+		Owner: cfg.GitHub.Owner, Repo: cfg.GitHub.Repo, BundleID: bundleID, IOSPath: iosPath,
 		Scheme: cfg.IOS.Scheme, Configuration: configuration, FrameworkHint: centralFrameworkHint(cfg),
 		SnapshotNamespace: cfg.SnapshotNamespace,
 	}

@@ -27,9 +27,12 @@ const (
 var (
 	ProjectIDPattern         = regexp.MustCompile(`^p_[0-9a-f]{32}$`)
 	SnapshotNamespacePattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
-	ownerPattern             = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$`)
-	repoPattern              = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}$`)
-	schemePattern            = regexp.MustCompile(`^$|^[A-Za-z0-9][A-Za-z0-9 ._+()-]{0,127}$`)
+	// Matches the runner's own bundle identifier validation so a value accepted
+	// here cannot be rejected, or read differently, at signing time.
+	BundleIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{1,254}$`)
+	ownerPattern    = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$`)
+	repoPattern     = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}$`)
+	schemePattern   = regexp.MustCompile(`^$|^[A-Za-z0-9][A-Za-z0-9 ._+()-]{0,127}$`)
 )
 
 type Registry struct {
@@ -39,8 +42,15 @@ type Registry struct {
 }
 
 type Project struct {
-	Owner             string `json:"owner"`
-	Repo              string `json:"repo"`
+	Owner string `json:"owner"`
+	Repo  string `json:"repo"`
+	// BundleID pins the only application identity this project may be signed
+	// as. It is optional so existing registrations keep building unsigned, but
+	// the signed operations refuse to run without it: the bundle identifier
+	// otherwise comes from the built application, which is project-controlled,
+	// and would let one project be signed with another's identity and inherit
+	// its entitlements.
+	BundleID          string `json:"bundle_id,omitempty"`
 	IOSPath           string `json:"ios_path,omitempty"`
 	Scheme            string `json:"scheme,omitempty"`
 	Configuration     string `json:"configuration"`
@@ -128,6 +138,9 @@ func (p *Project) Validate() error {
 	default:
 		return errors.New("invalid framework hint")
 	}
+	if p.BundleID != "" && !BundleIDPattern.MatchString(p.BundleID) {
+		return errors.New("invalid bundle identifier")
+	}
 	if !SnapshotNamespacePattern.MatchString(p.SnapshotNamespace) {
 		return errors.New("invalid snapshot namespace")
 	}
@@ -195,7 +208,7 @@ func MaskValues(project *Project, snapshotRef string) []string {
 	for _, value := range repositoryValues {
 		values = append(values, strings.ToLower(value))
 	}
-	values = append(values, project.SnapshotNamespace, snapshotRef, project.IOSPath, project.Scheme)
+	values = append(values, project.SnapshotNamespace, snapshotRef, project.IOSPath, project.Scheme, project.BundleID)
 	seen := make(map[string]bool)
 	filtered := values[:0]
 	for _, value := range values {

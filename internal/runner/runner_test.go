@@ -60,6 +60,73 @@ func TestResolveOpaqueProjectMasksBeforeOutputs(t *testing.T) {
 	}
 }
 
+func TestResolveProjectRequiresPinnedBundleIDForSignedOperations(t *testing.T) {
+	resolve := func(t *testing.T, operation, bundleID string) error {
+		t.Helper()
+		in := validInputs(t)
+		in.Operation = operation
+		value := registry.New()
+		project := &registry.Project{
+			Owner: "private-owner", Repo: "private-repo", BundleID: bundleID, IOSPath: "ios",
+			Scheme: "Private App", Configuration: "Debug", FrameworkHint: "auto",
+			SnapshotNamespace: "11111111111111111111111111111111",
+		}
+		if err := value.Put(in.ProjectID, project); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := value.Marshal()
+		outputPath := filepath.Join(t.TempDir(), "github-output")
+		if err := os.WriteFile(outputPath, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+		var commands bytes.Buffer
+		return ResolveProject(&in, string(data), outputPath, &commands)
+	}
+
+	// Unsigned builds never reach an Apple identity, so they stay unpinned.
+	if err := resolve(t, OperationBuild, ""); err != nil {
+		t.Fatalf("unsigned build rejected without a pinned bundle identifier: %v", err)
+	}
+	// Signing an unpinned project would take the identity from project-controlled
+	// build output, so both signed operations must refuse.
+	for _, operation := range []string{OperationTestFlight, OperationAdHoc} {
+		t.Run(operation, func(t *testing.T) {
+			if err := resolve(t, operation, ""); err == nil {
+				t.Fatal("signed operation accepted a project with no pinned bundle identifier")
+			}
+			if err := resolve(t, operation, "com.example.app"); err != nil {
+				t.Fatalf("pinned project rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestVerifyBuiltBundleIDRejectsMismatch(t *testing.T) {
+	appPath := filepath.Join(t.TempDir(), "App.app")
+	if err := os.MkdirAll(appPath, 0700); err != nil {
+		t.Fatal(err)
+	}
+	info := `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.example.app</string>
+<key>CFBundleShortVersionString</key><string>1.0</string>
+</dict></plist>`
+	if err := os.WriteFile(filepath.Join(appPath, "Info.plist"), []byte(info), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyBuiltBundleID(appPath, "com.example.app"); err != nil {
+		t.Fatalf("matching bundle identifier rejected: %v", err)
+	}
+	// The whole point: a project must not be able to build itself as another
+	// application in the same Apple team and inherit its entitlements.
+	if err := verifyBuiltBundleID(appPath, "com.example.other"); err == nil {
+		t.Fatal("mismatched bundle identifier accepted")
+	}
+	if err := verifyBuiltBundleID(appPath, ""); err != nil {
+		t.Fatalf("unpinned project rejected: %v", err)
+	}
+}
+
 func TestInputsValidate(t *testing.T) {
 	valid := validInputs(t)
 	if err := valid.Validate(); err != nil {
