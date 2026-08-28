@@ -69,7 +69,6 @@ jobs:
             --project-id "$PROJECT_ID" \
             --artifact-recipient "$ARTIFACT_RECIPIENT" \
             --operation "$OPERATION" \
-            --registry "$PROJECT_REGISTRY" \
             --github-output "$GITHUB_OUTPUT"
 
       - name: Create repository-scoped GitHub App token
@@ -212,6 +211,9 @@ jobs:
       contents: read
       attestations: write
       id-token: write
+    env:
+      BUILD_ID: ${{ inputs.build_id }}
+      PROJECT_ID: ${{ inputs.project_id }}
 
     steps:
       - name: Checkout trusted public builder only
@@ -248,8 +250,8 @@ jobs:
           "$RUNNER_TEMP/builder-runner" trusted-package \
             --input "$RUNNER_TEMP/project-intermediate" \
             --output "$RUNNER_TEMP/trusted-output" \
-            --build-id "${{ inputs.build_id }}" \
-            --project-id "${{ inputs.project_id }}" \
+            --build-id "$BUILD_ID" \
+            --project-id "$PROJECT_ID" \
             --builder-commit "$GITHUB_SHA" \
             --workflow-ref "$GITHUB_WORKFLOW_REF" \
             --recipient "$APPLE_SIGNING_RECIPIENT" \
@@ -327,6 +329,8 @@ jobs:
     timeout-minutes: 45
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      BUILD_ID: ${{ inputs.build_id }}
+      PROJECT_ID: ${{ inputs.project_id }}
 
     steps:
       - name: Checkout trusted public builder only
@@ -361,8 +365,8 @@ jobs:
         run: |
           "$RUNNER_TEMP/builder-runner" verify-provenance \
             --input "$RUNNER_TEMP/intermediate" \
-            --build-id "${{ inputs.build_id }}" \
-            --project-id "${{ inputs.project_id }}" \
+            --build-id "$BUILD_ID" \
+            --project-id "$PROJECT_ID" \
             --builder-commit "$GITHUB_SHA" \
             --workflow-ref "$GITHUB_WORKFLOW_REF" \
             --repository "$GITHUB_REPOSITORY" \
@@ -391,8 +395,8 @@ jobs:
           "$RUNNER_TEMP/builder-runner" sign-adhoc \
             --encrypted-ipa "$RUNNER_TEMP/intermediate/App.ipa.age" \
             --manifest "$RUNNER_TEMP/intermediate/provenance.json" \
-            --build-id "${{ inputs.build_id }}" \
-            --project-id "${{ inputs.project_id }}" \
+            --build-id "$BUILD_ID" \
+            --project-id "$PROJECT_ID" \
             --builder-commit "$GITHUB_SHA" \
             --workflow-ref "$GITHUB_WORKFLOW_REF" \
             --log "$RUNNER_TEMP/adhoc-private/build.log" \
@@ -448,6 +452,8 @@ jobs:
     timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      BUILD_ID: ${{ inputs.build_id }}
+      PROJECT_ID: ${{ inputs.project_id }}
 
     steps:
       - name: Checkout trusted public builder only
@@ -482,8 +488,8 @@ jobs:
         run: |
           "$RUNNER_TEMP/builder-runner" verify-provenance \
             --input "$RUNNER_TEMP/intermediate" \
-            --build-id "${{ inputs.build_id }}" \
-            --project-id "${{ inputs.project_id }}" \
+            --build-id "$BUILD_ID" \
+            --project-id "$PROJECT_ID" \
             --builder-commit "$GITHUB_SHA" \
             --workflow-ref "$GITHUB_WORKFLOW_REF" \
             --repository "$GITHUB_REPOSITORY" \
@@ -511,8 +517,8 @@ jobs:
           "$RUNNER_TEMP/builder-runner" deploy-testflight \
             --encrypted-ipa "$RUNNER_TEMP/intermediate/App.ipa.age" \
             --manifest "$RUNNER_TEMP/intermediate/provenance.json" \
-            --build-id "${{ inputs.build_id }}" \
-            --project-id "${{ inputs.project_id }}" \
+            --build-id "$BUILD_ID" \
+            --project-id "$PROJECT_ID" \
             --builder-commit "$GITHUB_SHA" \
             --workflow-ref "$GITHUB_WORKFLOW_REF" \
             --log "$RUNNER_TEMP/deploy-private/build.log" \

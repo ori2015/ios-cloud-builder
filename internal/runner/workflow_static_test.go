@@ -70,9 +70,26 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 	if !bytes.Equal(rootWorkflow, template) {
 		t.Fatal("root central workflow and embedded template differ")
 	}
-	var parsed any
+	var parsed struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Run string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
 	if err := yaml.Unmarshal(rootWorkflow, &parsed); err != nil {
 		t.Fatalf("central workflow is not valid YAML: %v", err)
+	}
+	for _, jobName := range []string{"trusted-package", "sign-adhoc", "sign-and-deploy"} {
+		job, ok := parsed.Jobs[jobName]
+		if !ok {
+			t.Fatalf("central workflow is missing protected job %q", jobName)
+		}
+		for stepIndex, step := range job.Steps {
+			if strings.Contains(step.Run, "${{ inputs.") {
+				t.Errorf("job %q run step %d interpolates workflow inputs directly", jobName, stepIndex+1)
+			}
+		}
 	}
 	// Git for Windows commonly checks text files out with CRLF. Normalize only
 	// for semantic assertions; byte identity above still protects the embedded
@@ -192,7 +209,7 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 		"actions/cache", "DerivedData cache", "use_signing", "IOS_CERTIFICATE",
 		"GITHUB_STEP_SUMMARY", "eval ", "printenv", "git remote -v", "npm install",
 		"app-id:", "encrypted/*.age", "notify-approval:", "TELEGRAM_BOT_TOKEN",
-		"TELEGRAM_CHAT_ID", "APPROVAL_URL", "approval required",
+		"TELEGRAM_CHAT_ID", "APPROVAL_URL", "approval required", "--registry ",
 	} {
 		if strings.Contains(text, forbidden) {
 			t.Errorf("central workflow contains forbidden text %q", forbidden)

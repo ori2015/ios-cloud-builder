@@ -229,12 +229,15 @@ func validateInputs(args []string) error {
 func resolveProject(args []string) error {
 	flags := newFlags("resolve-project")
 	var in runner.Inputs
-	var registryJSON, githubOutput string
+	var githubOutput string
+	registryJSON := os.Getenv("PROJECT_REGISTRY")
+	if err := os.Unsetenv("PROJECT_REGISTRY"); err != nil {
+		return fmt.Errorf("clear protected project registry environment")
+	}
 	flags.StringVar(&in.BuildID, "build-id", "", "")
 	flags.StringVar(&in.ProjectID, "project-id", "", "")
 	flags.StringVar(&in.ArtifactRecipient, "artifact-recipient", "", "")
 	flags.StringVar(&in.Operation, "operation", "", "")
-	flags.StringVar(&registryJSON, "registry", "", "")
 	flags.StringVar(&githubOutput, "github-output", "", "")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return fmt.Errorf("invalid project resolution arguments")
