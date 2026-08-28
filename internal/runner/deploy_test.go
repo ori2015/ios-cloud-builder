@@ -259,8 +259,8 @@ func TestMaterializeProvisioningProfilesSupportsLegacyAndBundle(t *testing.T) {
 	var archive bytes.Buffer
 	writer := zip.NewWriter(&archive)
 	for name, contents := range map[string]string{
-		"TripNearby.mobileprovision":     "trip profile",
-		"GravityKingdom.mobileprovision": "gravity profile",
+		"TripNearby.mobileprovision": "trip profile",
+		"App.mobileprovision":        "profile",
 	} {
 		member, err := writer.Create(name)
 		if err != nil {

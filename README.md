@@ -60,8 +60,16 @@ The public builder workflow uses the stable `macos-15` runner image. No local Ma
 From a published release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ori2015/ios-cloud-builder/main/install.sh | bash
+INSTALLER_COMMIT=4138a8cedfd986540035e5e284e9118f88af4f8c
+curl -fsSLo install-builder.sh \
+  "https://raw.githubusercontent.com/ori2015/ios-cloud-builder/$INSTALLER_COMMIT/install.sh"
+echo 'c4cc7d0f927fabee7b0087cc8e119d0627315250b55723c3627e8c5ebcb170cc  install-builder.sh' \
+  | sha256sum -c -
+bash install-builder.sh
+rm install-builder.sh
 ```
+
+On macOS, use `shasum -a 256 -c -` in place of `sha256sum -c -`.
 
 Or build from source with Go 1.24 or newer:
 
