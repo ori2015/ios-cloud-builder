@@ -482,24 +482,24 @@ func signApplicationInPlace(ctx context.Context, req *signRequest) error {
 	if err != nil {
 		return fmt.Errorf("create temporary keychain password")
 	}
-	defer func() { _ = run.runSensitive(workRoot, "/usr/bin/security", "delete-keychain", keychainPath) }()
-	if err := run.runSensitive(workRoot, "/usr/bin/security", "create-keychain", "-p", keychainPassword, keychainPath); err != nil {
+	defer func() { _ = run.runSensitive(nil, workRoot, "/usr/bin/security", "delete-keychain", keychainPath) }()
+	if err := run.runSensitive(nil, workRoot, "/usr/bin/security", "create-keychain", "-p", keychainPassword, keychainPath); err != nil {
 		return err
 	}
-	if err := run.runSensitive(workRoot, "/usr/bin/security", "set-keychain-settings", "-lut", "21600", keychainPath); err != nil {
+	if err := run.runSensitive(nil, workRoot, "/usr/bin/security", "set-keychain-settings", "-lut", "21600", keychainPath); err != nil {
 		return err
 	}
-	if err := run.runSensitive(workRoot, "/usr/bin/security", "unlock-keychain", "-p", keychainPassword, keychainPath); err != nil {
+	if err := run.runSensitive(nil, workRoot, "/usr/bin/security", "unlock-keychain", "-p", keychainPassword, keychainPath); err != nil {
 		return err
 	}
-	if err := run.runSensitive(workRoot, "/usr/bin/security", "import", req.p12Path, "-P", credentials.p12Password,
+	if err := run.runSensitive(nil, workRoot, "/usr/bin/security", "import", req.p12Path, "-P", credentials.p12Password,
 		"-T", "/usr/bin/codesign", "-t", "cert", "-f", "pkcs12", "-k", keychainPath); err != nil {
 		return err
 	}
-	if err := run.runSensitive(workRoot, "/usr/bin/security", "set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", keychainPassword, keychainPath); err != nil {
+	if err := run.runSensitive(nil, workRoot, "/usr/bin/security", "set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", keychainPassword, keychainPath); err != nil {
 		return err
 	}
-	if err := run.runSensitive(workRoot, "/usr/bin/security", "list-keychains", "-d", "user", "-s", keychainPath); err != nil {
+	if err := run.runSensitive(nil, workRoot, "/usr/bin/security", "list-keychains", "-d", "user", "-s", keychainPath); err != nil {
 		return err
 	}
 	// Keep code-signing identity discovery scoped to the disposable keychain.
@@ -597,10 +597,17 @@ func signApplicationInPlace(ctx context.Context, req *signRequest) error {
 	return signApplication(run, req.appPath, signingIdentity, entitlementsPath, keychainPath)
 }
 
-func (e executor) runSensitive(dir, program string, args ...string) error {
+// runSensitive runs program with its arguments kept out of the log. The
+// output goes to the private log and, when capture is non-nil, also to capture.
+func (e executor) runSensitive(capture io.Writer, dir, program string, args ...string) error {
 	_, _ = fmt.Fprintf(e.log, "\n$ %s [arguments redacted]\n", filepath.Base(program))
 	cmd := exec.CommandContext(e.ctx, program, args...)
 	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = dir, e.env, e.log, e.log
+	if capture != nil {
+		// One shared writer, so exec never writes to capture concurrently.
+		cmd.Stdout = io.MultiWriter(e.log, capture)
+		cmd.Stderr = cmd.Stdout
+	}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s failed: %w", filepath.Base(program), err)
 	}
@@ -622,14 +629,9 @@ var altoolFailureMarkers = []string{
 // output reports a rejection. The output only reaches the private log; the
 // error carries the fixed marker, never altool's text.
 func (e executor) runAltool(dir string, args ...string) error {
-	_, _ = fmt.Fprintf(e.log, "\n$ xcrun [arguments redacted]\n")
 	var output bytes.Buffer
-	cmd := exec.CommandContext(e.ctx, "/usr/bin/xcrun", args...)
-	cmd.Dir, cmd.Env = dir, e.env
-	cmd.Stdout = io.MultiWriter(e.log, &output)
-	cmd.Stderr = cmd.Stdout
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("altool failed: %w", err)
+	if err := e.runSensitive(&output, dir, "/usr/bin/xcrun", args...); err != nil {
+		return err
 	}
 	if marker := altoolFailure(output.String()); marker != "" {
 		return fmt.Errorf("altool reported %q despite exit code 0", marker)
