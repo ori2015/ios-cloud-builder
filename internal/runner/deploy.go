@@ -419,11 +419,11 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 		return fmt.Errorf("signed IPA packaging produced no output")
 	}
 	fmt.Println("Validating application with App Store Connect...")
-	if err := uploadRun.runSensitive(workRoot, "/usr/bin/xcrun", altoolArgs("--validate-app", signedIPA, credentials)...); err != nil {
+	if err := uploadRun.runAltool(workRoot, altoolArgs("--validate-app", signedIPA, credentials)...); err != nil {
 		return fmt.Errorf("validation with App Store Connect failed")
 	}
 	fmt.Println("Uploading application to App Store Connect...")
-	if err := uploadRun.runSensitive(workRoot, "/usr/bin/xcrun", altoolArgs("--upload-app", signedIPA, credentials)...); err != nil {
+	if err := uploadRun.runAltool(workRoot, altoolArgs("--upload-app", signedIPA, credentials)...); err != nil {
 		return fmt.Errorf("upload to App Store Connect failed")
 	}
 	fmt.Println("App Store Connect accepted the upload. Waiting for it to finish processing the build...")
@@ -605,6 +605,45 @@ func (e executor) runSensitive(dir, program string, args ...string) error {
 		return fmt.Errorf("%s failed: %w", filepath.Base(program), err)
 	}
 	return nil
+}
+
+// altoolFailureMarkers are printed by altool when App Store Connect rejects a
+// package. altool (at least in Xcode 26.3) still exits 0 on server-side
+// validation errors such as a 409, so the exit code alone cannot be trusted.
+var altoolFailureMarkers = []string{
+	"VERIFY FAILED",
+	"UPLOAD FAILED",
+	"Failed to validate package",
+	"Failed to upload package",
+	"Validation failed (",
+}
+
+// runAltool runs xcrun altool like runSensitive and additionally fails when the
+// output reports a rejection. The output only reaches the private log; the
+// error carries the fixed marker, never altool's text.
+func (e executor) runAltool(dir string, args ...string) error {
+	_, _ = fmt.Fprintf(e.log, "\n$ xcrun [arguments redacted]\n")
+	var output bytes.Buffer
+	cmd := exec.CommandContext(e.ctx, "/usr/bin/xcrun", args...)
+	cmd.Dir, cmd.Env = dir, e.env
+	cmd.Stdout = io.MultiWriter(e.log, &output)
+	cmd.Stderr = cmd.Stdout
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("altool failed: %w", err)
+	}
+	if marker := altoolFailure(output.String()); marker != "" {
+		return fmt.Errorf("altool reported %q despite exit code 0", marker)
+	}
+	return nil
+}
+
+func altoolFailure(output string) string {
+	for _, marker := range altoolFailureMarkers {
+		if strings.Contains(output, marker) {
+			return marker
+		}
+	}
+	return ""
 }
 
 // decryptFileBounded caps the plaintext at maxDeployIPABytes; every caller

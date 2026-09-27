@@ -518,3 +518,23 @@ func TestAltoolArgsSupportsTeamAndIndividualKeys(t *testing.T) {
 		t.Fatalf("individual args = %#v", individual)
 	}
 }
+
+func TestAltoolFailureDetectsRejectionDespiteExitZero(t *testing.T) {
+	// Shortened from a real Xcode 26.3 run that exited 0.
+	rejected := `UPLOAD FAILED with 1 error
+Failed to upload package. Validation failed (409) Missing app icon. (ID: 00000000-0000-0000-0000-000000000000)`
+	if altoolFailure(rejected) == "" {
+		t.Fatalf("rejected upload output was treated as success")
+	}
+	if altoolFailure("VERIFY FAILED with 1 error\nValidation failed (409) Missing app icon.") == "" {
+		t.Fatalf("rejected validation output was treated as success")
+	}
+	for _, succeeded := range []string{
+		"No errors validating archive at '/tmp/App.ipa'\nVERIFY SUCCEEDED with no errors",
+		"No errors uploading 'App.ipa'\nUPLOAD SUCCEEDED with no errors",
+	} {
+		if marker := altoolFailure(succeeded); marker != "" {
+			t.Fatalf("successful output %q matched %q", succeeded, marker)
+		}
+	}
+}
