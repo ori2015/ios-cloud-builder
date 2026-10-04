@@ -185,7 +185,9 @@ func TestCopyEntitlementsRequestFindsTheBuildEntitlements(t *testing.T) {
 		t.Fatal(err)
 	}
 	var log bytes.Buffer
-	copyEntitlementsRequest(derived, app, "Release", &log)
+	if !copyEntitlementsRequest(derived, app, "Release", &log) {
+		t.Fatal("no request recorded")
+	}
 	data, err := os.ReadFile(filepath.Join(app, entitlementsRequestFile))
 	if err != nil || string(data) != testXcentWithDomains {
 		t.Fatalf("entitlements request not recorded: err=%v data=%q", err, data)
@@ -202,7 +204,7 @@ func TestCopyEntitlementsRequestIsBestEffort(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(app, entitlementsRequestFile)); !os.IsNotExist(err) {
 		t.Fatalf("a request file appeared without a build entitlements file: %v", err)
 	}
-	if !strings.Contains(log.String(), "as-is") {
+	if !strings.Contains(log.String(), "Examined 0") {
 		t.Fatalf("missing explanation in the private log: %q", log.String())
 	}
 }
@@ -366,5 +368,69 @@ func TestTrustedPackageCarriesAssociatedDomains(t *testing.T) {
 	}
 	if want := []string{"applinks:app.example.com", "applinks:www.example.com"}; !reflect.DeepEqual(manifest.AssociatedDomains, want) {
 		t.Fatalf("manifest associated domains = %v, want %v", manifest.AssociatedDomains, want)
+	}
+}
+
+// The .xcent is named after the target, which need not match the product name
+// (a Unity project builds target Unity-iPhone into AlienFlow.app).
+func TestCopyEntitlementsRequestMatchesTargetNameAndSkipsOtherTargets(t *testing.T) {
+	derived := t.TempDir()
+	dir := filepath.Join(derived, "Build", "Intermediates.noindex", "Unity-iPhone.build", "Release-iphoneos")
+	for path, content := range map[string]string{
+		filepath.Join(dir, "UnityFramework.build", "UnityFramework.app.xcent"): `<?xml version="1.0"?><plist version="1.0"><dict><key>get-task-allow</key><false/></dict></plist>`,
+		filepath.Join(dir, "Unity-iPhone.build", "Unity-iPhone.app.xcent"):     testXcentWithDomains,
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	app := filepath.Join(t.TempDir(), "Product.app")
+	if err := os.MkdirAll(app, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if !copyEntitlementsRequest(derived, app, "Release", &bytes.Buffer{}) {
+		t.Fatal("the target-named entitlements file was not found")
+	}
+	data, err := os.ReadFile(filepath.Join(app, entitlementsRequestFile))
+	if err != nil || string(data) != testXcentWithDomains {
+		t.Fatalf("recorded the wrong file: err=%v data=%q", err, data)
+	}
+	if copyEntitlementsRequest(derived, app, "Debug", &bytes.Buffer{}) {
+		t.Fatal("a request was recorded for a configuration that was not built")
+	}
+}
+
+func TestEntitlementsFileFromBuildSettings(t *testing.T) {
+	root := t.TempDir()
+	ios := filepath.Join(root, "ios")
+	if err := os.MkdirAll(ios, 0700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(ios, "Entitlements.entitlements")
+	if err := os.WriteFile(file, []byte(testXcentWithDomains), 0600); err != nil {
+		t.Fatal(err)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := func(entitlements, srcroot string) []byte {
+		return []byte("Build settings for action build and target UnityFramework:\n    ACTION = build\n    SRCROOT = " + srcroot +
+			"\n\nBuild settings for action build and target Unity-iPhone:\n    ACTION = build\n    CODE_SIGN_ENTITLEMENTS = " + entitlements +
+			"\n    SRCROOT = " + srcroot + "\n")
+	}
+	got, ok := entitlementsFileFromBuildSettings(settings("Entitlements.entitlements", ios), resolvedRoot)
+	wantResolved, _ := filepath.EvalSymlinks(file)
+	if !ok || got != wantResolved {
+		t.Fatalf("got %q ok=%v, want %q", got, ok, wantResolved)
+	}
+	if _, ok := entitlementsFileFromBuildSettings(settings("../../outside.entitlements", ios), resolvedRoot); ok {
+		t.Fatal("a path outside the checkout was accepted")
+	}
+	if _, ok := entitlementsFileFromBuildSettings([]byte("Build settings for action build and target X:\n    ACTION = build\n"), resolvedRoot); ok {
+		t.Fatal("settings without an entitlements file produced a path")
 	}
 }

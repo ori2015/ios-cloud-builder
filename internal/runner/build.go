@@ -256,6 +256,7 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 		} else {
 			args = append(args, "-project", project)
 		}
+		container := append([]string{}, args...)
 		args = append(args,
 			"-scheme", scheme,
 			"-configuration", options.Configuration,
@@ -272,8 +273,8 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 			return err
 		}
 		appPath, err = findApp(filepath.Join(derivedData, "Build", "Products", options.Configuration+"-iphoneos"))
-		if err == nil {
-			copyEntitlementsRequest(derivedData, appPath, options.Configuration, privateLog)
+		if err == nil && !copyEntitlementsRequest(derivedData, appPath, options.Configuration, privateLog) {
+			recordEntitlementsFromSettings(run, iosRoot, sourceRoot, container, scheme, options.Configuration, appPath)
 		}
 	}
 	if err != nil {
