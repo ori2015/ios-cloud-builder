@@ -79,34 +79,105 @@ func validateAssociatedDomains(values []string) error {
 
 // copyEntitlementsRequest makes the entitlements Xcode computed for the
 // unsigned build available to the trusted packager. With code signing disabled
-// they are not embedded in the app, but Xcode still writes them to
-// <App>.app.xcent in the intermediates directory. It is best effort: a missing
-// file only means the profile's own entitlements are used, as before.
-func copyEntitlementsRequest(derivedData, appPath, configuration string, log io.Writer) {
-	name := filepath.Base(appPath) + ".xcent"
+// they are not embedded in the app, but Xcode still writes them to a
+// "<name>.app.xcent" file in the intermediates directory. The name follows the
+// target, which need not match the product name, so every .xcent of the
+// configuration is considered and the first that requests Associated Domains is
+// used. It reports whether a request was recorded; a miss only means the
+// profile's own entitlements are used, as before.
+func copyEntitlementsRequest(derivedData, appPath, configuration string, log io.Writer) bool {
 	root := filepath.Join(derivedData, "Build", "Intermediates.noindex")
+	marker := string(filepath.Separator) + configuration + "-iphoneos" + string(filepath.Separator)
 	var matches []string
 	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		if !entry.IsDir() && entry.Name() == name && strings.Contains(path, string(filepath.Separator)+configuration+"-iphoneos"+string(filepath.Separator)) {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".app.xcent") && strings.Contains(path, marker) {
 			matches = append(matches, path)
 		}
 		return nil
 	})
-	if len(matches) == 0 {
-		_, _ = fmt.Fprintln(log, "No build entitlements file was found; the provisioning profile entitlements will be used as-is.")
+	sort.Strings(matches)
+	for _, match := range matches {
+		data, err := readBoundedRegularFile(match, maxEntitlementsRequestBytes)
+		if err != nil || !requestsAssociatedDomains(data) {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(appPath, entitlementsRequestFile), data, 0600); err != nil {
+			_, _ = fmt.Fprintln(log, "The build entitlements file could not be recorded.")
+			return false
+		}
+		return true
+	}
+	_, _ = fmt.Fprintf(log, "Examined %d build entitlements file(s); none requested associated domains.\n", len(matches))
+	return false
+}
+
+func requestsAssociatedDomains(data []byte) bool {
+	var request struct {
+		Domains []string `plist:"com.apple.developer.associated-domains"`
+	}
+	_, err := plist.Unmarshal(data, &request)
+	return err == nil && len(request.Domains) > 0
+}
+
+// entitlementsFileFromBuildSettings finds the project's own entitlements file
+// from `xcodebuild -showBuildSettings` output. It is the fallback for builds in
+// which no .xcent is produced. The file must resolve inside sourceRoot.
+func entitlementsFileFromBuildSettings(settings []byte, sourceRoot string) (string, bool) {
+	var entitlements, srcroot string
+	flush := func() (string, bool) {
+		if entitlements == "" || srcroot == "" {
+			return "", false
+		}
+		path := entitlements
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(srcroot, path)
+		}
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil || !pathWithin(sourceRoot, resolved) {
+			return "", false
+		}
+		return resolved, true
+	}
+	for _, line := range strings.Split(string(settings), "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "Build settings for action"):
+			if path, ok := flush(); ok {
+				return path, true
+			}
+			entitlements, srcroot = "", ""
+		case strings.HasPrefix(trimmed, "CODE_SIGN_ENTITLEMENTS = "):
+			entitlements = strings.TrimSpace(strings.TrimPrefix(trimmed, "CODE_SIGN_ENTITLEMENTS = "))
+		case strings.HasPrefix(trimmed, "SRCROOT = "):
+			srcroot = strings.TrimSpace(strings.TrimPrefix(trimmed, "SRCROOT = "))
+		}
+	}
+	return flush()
+}
+
+// recordEntitlementsFromSettings is the fallback for copyEntitlementsRequest.
+func recordEntitlementsFromSettings(run executor, iosRoot, sourceRoot string, container []string, scheme, configuration, appPath string) {
+	args := append(append([]string{}, container...), "-scheme", scheme, "-configuration", configuration,
+		"-destination", "generic/platform=iOS", "-showBuildSettings")
+	output, err := run.capture(iosRoot, "xcodebuild", args...)
+	if err != nil {
 		return
 	}
-	sort.Strings(matches)
-	data, err := readBoundedRegularFile(matches[0], maxEntitlementsRequestBytes)
-	if err != nil {
-		_, _ = fmt.Fprintln(log, "The build entitlements file could not be read; the provisioning profile entitlements will be used as-is.")
+	path, ok := entitlementsFileFromBuildSettings(output, sourceRoot)
+	if !ok {
+		_, _ = fmt.Fprintln(run.log, "No project entitlements file was found in the build settings.")
+		return
+	}
+	data, err := readBoundedRegularFile(path, maxEntitlementsRequestBytes)
+	if err != nil || !requestsAssociatedDomains(data) {
+		_, _ = fmt.Fprintln(run.log, "The project entitlements file does not request associated domains.")
 		return
 	}
 	if err := os.WriteFile(filepath.Join(appPath, entitlementsRequestFile), data, 0600); err != nil {
-		_, _ = fmt.Fprintln(log, "The build entitlements file could not be recorded; the provisioning profile entitlements will be used as-is.")
+		_, _ = fmt.Fprintln(run.log, "The project entitlements file could not be recorded.")
 	}
 }
 
