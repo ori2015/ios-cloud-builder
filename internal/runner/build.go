@@ -272,6 +272,9 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 			return err
 		}
 		appPath, err = findApp(filepath.Join(derivedData, "Build", "Products", options.Configuration+"-iphoneos"))
+		if err == nil {
+			copyEntitlementsRequest(derivedData, appPath, options.Configuration, privateLog)
+		}
 	}
 	if err != nil {
 		return err

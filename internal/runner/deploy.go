@@ -240,6 +240,8 @@ func signAdHoc(ctx context.Context, options *AdHocOptions, manifest *ProvenanceM
 		profileType: ascAdHocProfileType,
 		credentials: credentials,
 		privateLog:  privateLog,
+
+		associatedDomains: manifest.AssociatedDomains,
 	}); err != nil {
 		return "", err
 	}
@@ -406,6 +408,8 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 		credentials: credentials,
 		publisher:   publisher,
 		privateLog:  privateLog,
+
+		associatedDomains: manifest.AssociatedDomains,
 	}); err != nil {
 		return err
 	}
@@ -470,6 +474,9 @@ type signRequest struct {
 	credentials *appleCredentials
 	publisher   *appStoreConnectClient
 	privateLog  io.Writer
+	// associatedDomains are the authenticated, sanitised applinks:<host> entries
+	// from the provenance manifest; see mergeAssociatedDomains.
+	associatedDomains []string
 }
 
 // signApplicationInPlace imports the distribution identity, selects or creates a
@@ -590,8 +597,7 @@ func signApplicationInPlace(ctx context.Context, req *signRequest) error {
 		return fmt.Errorf("embed provisioning profile")
 	}
 	entitlementsPath := filepath.Join(req.secretsDir, "entitlements.plist")
-	entitlements, err := plist.Marshal(profile.Entitlements, plist.XMLFormat)
-	if err != nil || os.WriteFile(entitlementsPath, entitlements, 0600) != nil {
+	if err := writeSigningEntitlements(entitlementsPath, profile.Entitlements, req.associatedDomains); err != nil {
 		return fmt.Errorf("prepare signing entitlements")
 	}
 	return signApplication(run, req.appPath, signingIdentity, entitlementsPath, keychainPath)

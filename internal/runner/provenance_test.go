@@ -53,7 +53,7 @@ func TestProvenanceManifestGeneration(t *testing.T) {
 		BuildID: "123e4567-e89b-42d3-a456-426614174000", ProjectID: "p_0123456789abcdef0123456789abcdef",
 		BuilderCommit: strings.Repeat("a", 40), WorkflowRef: "owner/repo/.github/workflows/ios-build.yml@refs/heads/main",
 	}
-	manifest, err := newProvenanceManifest(options, strings.Repeat("b", 64), strings.Repeat("c", 64), createdAt)
+	manifest, err := newProvenanceManifest(options, strings.Repeat("b", 64), strings.Repeat("c", 64), nil, createdAt)
 	if err != nil {
 		t.Fatal(err)
 	}

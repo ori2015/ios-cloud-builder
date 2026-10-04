@@ -41,6 +41,9 @@ type ProvenanceManifest struct {
 	BuilderCommit      string `json:"builder_commit"`
 	WorkflowRef        string `json:"workflow_ref"`
 	CreatedAt          string `json:"created_at"`
+	// AssociatedDomains holds sanitised applinks:<host> entries the project
+	// declared. The signing job substitutes them for the profile's wildcard.
+	AssociatedDomains []string `json:"associated_domains,omitempty"`
 }
 
 type ProvenanceExpectation struct {
@@ -119,6 +122,7 @@ func trustedPackageWithPackager(ctx context.Context, options *TrustedPackageOpti
 	if err := validateTrustedApplication(appPath); err != nil {
 		return err
 	}
+	associatedDomains := takeAssociatedDomainsRequest(appPath, privateLog)
 	privateHome := filepath.Join(workRoot, "home")
 	if err := os.Mkdir(privateHome, 0700); err != nil {
 		return errors.New("prepare trusted packaging home")
@@ -143,7 +147,7 @@ func trustedPackageWithPackager(ctx context.Context, options *TrustedPackageOpti
 	if err != nil {
 		return err
 	}
-	manifest, err := newProvenanceManifest(options, plainDigest, cipherDigest, time.Now())
+	manifest, err := newProvenanceManifest(options, plainDigest, cipherDigest, associatedDomains, time.Now())
 	if err != nil {
 		return err
 	}
@@ -184,7 +188,7 @@ func validateTrustedApplication(appPath string) error {
 	return nil
 }
 
-func newProvenanceManifest(options *TrustedPackageOptions, plainDigest, cipherDigest string, createdAt time.Time) (*ProvenanceManifest, error) {
+func newProvenanceManifest(options *TrustedPackageOptions, plainDigest, cipherDigest string, associatedDomains []string, createdAt time.Time) (*ProvenanceManifest, error) {
 	if options == nil || !sha256Pattern.MatchString(plainDigest) || !sha256Pattern.MatchString(cipherDigest) {
 		return nil, errors.New("invalid provenance manifest inputs")
 	}
@@ -199,6 +203,7 @@ func newProvenanceManifest(options *TrustedPackageOptions, plainDigest, cipherDi
 		Version: provenanceVersion, BuildID: options.BuildID, ProjectID: options.ProjectID, Operation: "testflight",
 		PlaintextIPASHA256: plainDigest, CiphertextSHA256: cipherDigest, BuilderCommit: options.BuilderCommit,
 		WorkflowRef: options.WorkflowRef, CreatedAt: createdAt.UTC().Format(time.RFC3339),
+		AssociatedDomains: associatedDomains,
 	}, nil
 }
 
@@ -233,6 +238,9 @@ func ValidateProvenanceArtifact(dir string, expected ProvenanceExpectation) (*Pr
 		manifest.Operation != "testflight" || manifest.BuilderCommit != expected.BuilderCommit || manifest.WorkflowRef != expected.WorkflowRef ||
 		!sha256Pattern.MatchString(manifest.PlaintextIPASHA256) || !sha256Pattern.MatchString(manifest.CiphertextSHA256) {
 		return nil, errors.New("provenance identity mismatch")
+	}
+	if err := validateAssociatedDomains(manifest.AssociatedDomains); err != nil {
+		return nil, err
 	}
 	digest, err := hashRegularFile(filepath.Join(dir, trustedIPAFile), maxDeployIPABytes+1024*1024)
 	if err != nil || subtle.ConstantTimeCompare([]byte(digest), []byte(manifest.CiphertextSHA256)) != 1 {
