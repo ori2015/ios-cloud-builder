@@ -98,6 +98,7 @@ type BuildOptions struct {
 	Unsigned   bool   // Skip code signing even if configured
 	TestFlight bool   // Sign and upload through the protected central environment
 	AdHoc      bool   // Sign for ad hoc installation and return the signed IPA
+	RunTests   bool   // Run unit tests on a simulator (central backend): unsigned, no IPA, log only
 	Remote     string // Git remote to push the working-tree snapshot to
 }
 

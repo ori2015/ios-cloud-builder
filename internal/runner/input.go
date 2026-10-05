@@ -33,6 +33,9 @@ const (
 	OperationBuild      = "build"
 	OperationTestFlight = "testflight"
 	OperationAdHoc      = "adhoc"
+	// OperationTest builds for the iOS Simulator and runs the project's unit tests.
+	// It is unsigned, produces no IPA and returns only the encrypted log.
+	OperationTest = "test"
 )
 
 var (
@@ -61,7 +64,7 @@ func (in *Inputs) Validate() error {
 	if err != nil || recipient.String() != in.ArtifactRecipient {
 		return fmt.Errorf("invalid artifact_recipient")
 	}
-	if in.Operation != OperationBuild && in.Operation != OperationTestFlight && in.Operation != OperationAdHoc {
+	if in.Operation != OperationBuild && in.Operation != OperationTest && in.Operation != OperationTestFlight && in.Operation != OperationAdHoc {
 		return fmt.Errorf("invalid operation")
 	}
 	return nil

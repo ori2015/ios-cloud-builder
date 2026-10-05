@@ -29,6 +29,9 @@ type BuildOptions struct {
 	// project code is checked out, and enforced below against what the build
 	// actually produced.
 	BundleID string
+	// RunTests runs `xcodebuild test` on an iOS Simulator instead of producing
+	// an IPA. Supported for native Xcode / XcodeGen projects only.
+	RunTests bool
 }
 
 // ExecuteSecure keeps the trusted runner resident while private project code
@@ -207,6 +210,9 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 		return fmt.Errorf("iOS path is missing or escapes the private checkout")
 	}
 
+	if options.RunTests && options.Framework != FrameworkNative && options.Framework != FrameworkKMP {
+		return fmt.Errorf("simulator tests are supported for native Xcode and XcodeGen projects only")
+	}
 	var appPath string
 	if options.Framework == FrameworkFlutter {
 		if err := run.run(sourceRoot, "flutter", "pub", "get"); err != nil {
@@ -250,6 +256,9 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 		derivedData := filepath.Join(filepath.Dir(options.LogPath), "DerivedData")
 		_ = os.RemoveAll(derivedData)
 		defer func() { _ = os.RemoveAll(derivedData) }()
+		if options.RunTests {
+			return runSimulatorTests(run, iosRoot, workspace, project, scheme, derivedData)
+		}
 		args := make([]string, 0, 20)
 		if workspace != "" {
 			args = append(args, "-workspace", workspace)
