@@ -25,3 +25,16 @@ func TestPickSimulatorErrors(t *testing.T) {
 		t.Fatal("expected parse error")
 	}
 }
+
+func TestFilterOutDestinationKeepsContainerAndScheme(t *testing.T) {
+	got := filterOutDestination([]string{"-project", "A.xcodeproj", "-scheme", "S", "-destination", "x", "-derivedDataPath", "/d", "CODE_SIGNING_ALLOWED=NO", "-showdestinations"})
+	want := []string{"-project", "A.xcodeproj", "-scheme", "S", "-showdestinations"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v want %v", got, want)
+		}
+	}
+}
