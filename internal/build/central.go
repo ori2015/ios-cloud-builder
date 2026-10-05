@@ -87,7 +87,7 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 
 	owner, repo, workflow := c.config.Builder.Owner, c.config.Builder.Repo, c.config.Builder.Workflow
 	c.progress.Update(PhaseTriggering, "Triggering central GitHub Actions build...")
-	if err := c.github.TriggerWorkflow(ctx, owner, repo, workflow, centralDispatchInputs(c.config, buildID, opts.TestFlight, opts.AdHoc)); err != nil {
+	if err := c.github.TriggerWorkflow(ctx, owner, repo, workflow, centralDispatchInputsFor(c.config, buildID, opts)); err != nil {
 		c.progress.Error(PhaseTriggering, err)
 		return result, fmt.Errorf("failed to trigger central workflow: %w", err)
 	}
@@ -186,8 +186,21 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 			kind = "TestFlight deployment"
 		case opts.AdHoc:
 			kind = "ad hoc signing"
+		case opts.RunTests:
+			kind = "simulator tests"
 		}
 		return result, fmt.Errorf("%s failed with conclusion %s; decrypted diagnostics: %s", kind, run.Conclusion, logPath)
+	}
+	if opts.RunTests {
+		logPath, logErr := decryptLogToFile(identity, contents.log, opts.OutputDir, buildID)
+		if logErr != nil {
+			return result, fmt.Errorf("decrypt successful test log: %w", logErr)
+		}
+		result.LogPath = logPath
+		result.Duration = time.Since(started)
+		c.progress.Complete(PhaseBuilding, "Simulator tests passed")
+		c.progress.Finish()
+		return result, nil
 	}
 	if opts.TestFlight {
 		logPath, logErr := decryptLogToFile(identity, contents.log, opts.OutputDir, buildID)
@@ -283,6 +296,15 @@ func centralIdentity(cfg *config.Config) (*age.X25519Identity, error) {
 		return nil, errors.New("local AGE identity does not match security.recipient in builder.json")
 	}
 	return identity, nil
+}
+
+// centralDispatchInputsFor adds the unsigned simulator-test operation on top of the signed/unsigned build ones.
+func centralDispatchInputsFor(cfg *config.Config, buildID string, opts BuildOptions) map[string]string {
+	inputs := centralDispatchInputs(cfg, buildID, opts.TestFlight, opts.AdHoc)
+	if opts.RunTests && !opts.TestFlight && !opts.AdHoc {
+		inputs["operation"] = "test"
+	}
+	return inputs
 }
 
 func centralDispatchInputs(cfg *config.Config, buildID string, testFlight, adHoc bool) map[string]string {

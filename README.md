@@ -240,6 +240,13 @@ Verify metadata without reading secret values:
 builder central doctor --testflight
 ```
 
+## Run unit tests on a simulator
+
+`builder ios test` (central backend, native Xcode or XcodeGen projects) builds the private snapshot for the newest installed
+iOS Simulator and runs `xcodebuild test`. Nothing is signed, no IPA is produced, and the encrypted log is decrypted to `dist/`.
+The deployment target is lowered to the simulator runtime for this run only, so projects targeting a newer OS than the runner's
+Xcode can still execute their tests.
+
 ## Add a private application
 
 From each authorized private application:

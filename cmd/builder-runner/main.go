@@ -322,6 +322,7 @@ func execute(args []string) error {
 	flags.StringVar(&ipaRecipient, "ipa-recipient", "", "")
 	flags.StringVar(&outputDir, "output", "", "")
 	flags.BoolVar(&projectIntermediate, "project-intermediate", false, "")
+	flags.BoolVar(&options.RunTests, "run-tests", false, "")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return fmt.Errorf("invalid secure execution arguments")
 	}

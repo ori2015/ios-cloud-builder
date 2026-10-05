@@ -558,6 +558,16 @@ var iosBuildCmd = &cobra.Command{
 	RunE:  runIOSBuild,
 }
 
+var iosTestCmd = &cobra.Command{
+	Use:   "test",
+	Short: "Run unit tests on a simulator through the central builder",
+	Long: `Builds the private working-tree snapshot for the iOS Simulator on the central builder
+and runs the project's unit tests (xcodebuild test). Nothing is signed and no IPA is produced; the
+decrypted log is written to the output directory. Requires backend=central and a native Xcode or
+XcodeGen project.`,
+	RunE: runIOSTest,
+}
+
 var iosDeployCmd = &cobra.Command{
 	Use:   "deploy",
 	Short: "Build, sign, and upload to TestFlight",
@@ -644,6 +654,10 @@ func init() {
 	iosBuildCmd.Flags().Bool("adhoc", false, "Sign for ad hoc installation on registered devices and return the signed IPA")
 	iosBuildCmd.Flags().StringP("remote", "r", "origin", "Git remote to push the working-tree snapshot to")
 	iosCmd.AddCommand(iosBuildCmd)
+	iosTestCmd.Flags().StringP("output", "o", "dist", "Output directory for the decrypted test log")
+	iosTestCmd.Flags().Duration("timeout", 40*time.Minute, "Test timeout")
+	iosTestCmd.Flags().StringP("remote", "r", "origin", "Git remote to push the working-tree snapshot to")
+	iosCmd.AddCommand(iosTestCmd)
 	iosDeployCmd.Flags().StringP("output", "o", "dist", "Output directory for decrypted diagnostic logs")
 	iosDeployCmd.Flags().Duration("timeout", 3*time.Hour, "Deployment timeout, including App Store Connect processing")
 	iosDeployCmd.Flags().StringP("remote", "r", "origin", "Git remote to push the working-tree snapshot to")
@@ -702,6 +716,29 @@ func runIOSBuild(cmd *cobra.Command, args []string) error {
 		AdHoc:      adHoc,
 		Remote:     remote,
 	})
+}
+
+func runIOSTest(cmd *cobra.Command, _ []string) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+	if !cfg.IsCentral() {
+		return fmt.Errorf("`builder ios test` requires backend=central")
+	}
+	outputDir, _ := cmd.Flags().GetString("output")
+	timeout, _ := cmd.Flags().GetDuration("timeout")
+	remote, _ := cmd.Flags().GetString("remote")
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runBuild(ctx, cfg, build.BuildOptions{OutputDir: outputDir, Timeout: timeout, RunTests: true, Remote: remote})
 }
 
 func runIOSDeploy(cmd *cobra.Command, _ []string) error {
@@ -790,7 +827,10 @@ func runBuild(ctx context.Context, cfg *config.Config, opts build.BuildOptions) 
 		return err
 	}
 
-	if result.TestFlight {
+	if opts.RunTests {
+		fmt.Println("Simulator tests passed")
+		fmt.Printf("Test log: %s\n", result.LogPath)
+	} else if result.TestFlight {
 		fmt.Println("TestFlight: build processed successfully by App Store Connect")
 		if result.LogPath != "" {
 			fmt.Printf("Apple log: %s\n", result.LogPath)

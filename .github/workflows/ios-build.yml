@@ -23,6 +23,7 @@ on:
         type: choice
         options:
           - build
+          - test
           - testflight
           - adhoc
 
@@ -150,13 +151,14 @@ jobs:
           BUNDLE_ID: ${{ steps.project.outputs.bundle_id }}
           FRAMEWORK: ${{ steps.detect.outputs.framework }}
           ARTIFACT_RECIPIENT: ${{ inputs.artifact_recipient }}
-          IPA_RECIPIENT: ${{ inputs.operation != 'build' && vars.PACKAGING_RECIPIENT || inputs.artifact_recipient }}
+          IPA_RECIPIENT: ${{ (inputs.operation == 'testflight' || inputs.operation == 'adhoc') && vars.PACKAGING_RECIPIENT || inputs.artifact_recipient }}
           OPERATION: ${{ inputs.operation }}
           CODE_SIGNING_ALLOWED: 'NO'
           CODE_SIGNING_REQUIRED: 'NO'
         run: |
           intermediate=()
-          if [ "$OPERATION" != "build" ]; then intermediate=(--project-intermediate); fi
+          if [ "$OPERATION" = "testflight" ] || [ "$OPERATION" = "adhoc" ]; then intermediate=(--project-intermediate); fi
+          if [ "$OPERATION" = "test" ]; then intermediate=(--run-tests); fi
           "$RUNNER_TEMP/builder-runner" execute \
             --source "$GITHUB_WORKSPACE/source" \
             --ios-path "$IOS_PATH" \

@@ -254,3 +254,17 @@ func makeZIP(t *testing.T, files map[string][]byte) []byte {
 	}
 	return buffer.Bytes()
 }
+
+func TestCentralDispatchInputsForSimulatorTests(t *testing.T) {
+	cfg := &config.Config{ProjectID: "p_0123456789abcdef0123456789abcdef", Security: config.SecurityConfig{Recipient: "age1x"}}
+	if got := centralDispatchInputsFor(cfg, "id", BuildOptions{RunTests: true}); got["operation"] != "test" {
+		t.Fatalf("operation = %q, want test", got["operation"])
+	}
+	// Signing operations always win over RunTests.
+	if got := centralDispatchInputsFor(cfg, "id", BuildOptions{RunTests: true, TestFlight: true}); got["operation"] != "testflight" {
+		t.Fatalf("operation = %q, want testflight", got["operation"])
+	}
+	if got := centralDispatchInputsFor(cfg, "id", BuildOptions{}); got["operation"] != "build" {
+		t.Fatalf("operation = %q, want build", got["operation"])
+	}
+}

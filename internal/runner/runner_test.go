@@ -391,3 +391,15 @@ func TestVerifyCheckoutNoCredentials(t *testing.T) {
 		t.Fatal("persisted checkout credential accepted")
 	}
 }
+
+func TestValidateAcceptsSimulatorTestOperation(t *testing.T) {
+	in := validInputs(t)
+	in.Operation = OperationTest
+	if err := in.Validate(); err != nil {
+		t.Fatalf("test operation rejected: %v", err)
+	}
+	in.Operation = "tests; rm -rf /"
+	if err := in.Validate(); err == nil {
+		t.Fatal("unknown operation accepted")
+	}
+}
