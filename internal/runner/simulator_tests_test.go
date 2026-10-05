@@ -38,3 +38,10 @@ func TestFilterOutDestinationKeepsContainerAndScheme(t *testing.T) {
 		}
 	}
 }
+
+func TestFilterDestinationArgs(t *testing.T) {
+	got := filterDestinationArgs([]string{"-workspace", "W.xcworkspace", "-scheme", "S", "-destination", "x", "A=B"})
+	if len(got) != 4 || got[0] != "-workspace" || got[3] != "S" {
+		t.Fatalf("got %v", got)
+	}
+}

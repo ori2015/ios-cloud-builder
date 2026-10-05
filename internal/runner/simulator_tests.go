@@ -98,13 +98,39 @@ func runSimulatorTests(run executor, iosRoot, workspace, project, scheme, derive
 		"test",
 	)
 	err = run.run(iosRoot, "xcodebuild", args...)
-	if err != nil {
-		// Diagnostic for destination problems; goes to the private log only.
-		showArgs := append(append([]string{}, args[:len(args)-1]...), "-showdestinations")
-		showArgs = filterOutDestination(showArgs)
-		_ = run.run(iosRoot, "xcodebuild", showArgs...)
+	if err == nil {
+		return nil
 	}
-	return err
+	// Diagnostics (private log only): what Xcode thinks it can run on.
+	showArgs := filterOutDestination(append(append([]string{}, args[:len(args)-1]...), "-showdestinations"))
+	_ = run.run(iosRoot, "xcodebuild", showArgs...)
+	_ = run.run(iosRoot, "xcrun", "simctl", "list", "runtimes")
+	// Some runner images list iOS simulators in simctl but not in xcodebuild. Compiling the app and its
+	// test bundle for the simulator SDK still verifies the build, so fall back to that and say so clearly.
+	fmt.Fprintln(run.log, "\nNo runnable simulator destination: falling back to build-for-testing (compile only, tests are NOT executed).")
+	fallback := filterDestinationArgs(args[:len(args)-1])
+	fallback = append(fallback, "-destination", "generic/platform=iOS Simulator", "-derivedDataPath", derivedData,
+		"IPHONEOS_DEPLOYMENT_TARGET="+sim.Runtime, "CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO",
+		"COMPILER_INDEX_STORE_ENABLE=NO", "build-for-testing")
+	if ferr := run.run(iosRoot, "xcodebuild", fallback...); ferr != nil {
+		return err
+	}
+	return fmt.Errorf("tests compiled but could not be executed (no runnable simulator destination)")
+}
+
+// filterDestinationArgs keeps only the container and scheme arguments.
+func filterDestinationArgs(args []string) []string {
+	out := []string{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-project", "-workspace", "-scheme":
+			if i+1 < len(args) {
+				out = append(out, args[i], args[i+1])
+				i++
+			}
+		}
+	}
+	return out
 }
 
 // filterOutDestination drops the -destination pair and build-setting overrides for -showdestinations.
