@@ -77,6 +77,10 @@ func runSimulatorTests(run executor, iosRoot, workspace, project, scheme, derive
 		return err
 	}
 	fmt.Fprintf(run.log, "Running tests on %s (iOS %s)\n", sim.Name, sim.Runtime)
+	// xcodebuild only lists iOS simulators once CoreSimulator has them booted/registered on a fresh runner;
+	// boot first (errors ignored: it may already be booted) and wait until it is ready.
+	_ = run.run(iosRoot, "xcrun", "simctl", "boot", sim.UDID)
+	_ = run.run(iosRoot, "xcrun", "simctl", "bootstatus", sim.UDID, "-b")
 	args := []string{}
 	if workspace != "" {
 		args = append(args, "-workspace", workspace)
@@ -93,5 +97,27 @@ func runSimulatorTests(run executor, iosRoot, workspace, project, scheme, derive
 		"COMPILER_INDEX_STORE_ENABLE=NO",
 		"test",
 	)
-	return run.run(iosRoot, "xcodebuild", args...)
+	err = run.run(iosRoot, "xcodebuild", args...)
+	if err != nil {
+		// Diagnostic for destination problems; goes to the private log only.
+		showArgs := append(append([]string{}, args[:len(args)-1]...), "-showdestinations")
+		showArgs = filterOutDestination(showArgs)
+		_ = run.run(iosRoot, "xcodebuild", showArgs...)
+	}
+	return err
+}
+
+// filterOutDestination drops the -destination pair and build-setting overrides for -showdestinations.
+func filterOutDestination(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "-destination" || args[i] == "-derivedDataPath":
+			i++
+		case strings.Contains(args[i], "="):
+		default:
+			out = append(out, args[i])
+		}
+	}
+	return out
 }
