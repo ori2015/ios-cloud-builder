@@ -34,12 +34,13 @@ const (
 )
 
 var (
-	ErrDeployFailed = errors.New("private TestFlight deployment failed; download the encrypted diagnostic log")
-	ErrAdHocFailed  = errors.New("private ad hoc signing failed; download the encrypted diagnostic log")
-	appleIDPattern  = regexp.MustCompile(`^[A-Z0-9]{10}$`)
-	issuerPattern   = regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
-	identityPattern = regexp.MustCompile(`(?m)^\s*[0-9]+\)\s+([0-9A-Fa-f]{40})\s+"([^"\r\n]+)"`)
-	buildPattern    = regexp.MustCompile(`^[1-9][0-9]{0,17}(?:\.[1-9][0-9]{0,17}){0,2}$`)
+	ErrDeployFailed    = errors.New("private TestFlight deployment failed; download the encrypted diagnostic log")
+	ErrAdHocFailed     = errors.New("private ad hoc signing failed; download the encrypted diagnostic log")
+	appleIDPattern     = regexp.MustCompile(`^[A-Z0-9]{10}$`)
+	issuerPattern      = regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
+	identityPattern    = regexp.MustCompile(`(?m)^\s*[0-9]+\)\s+([0-9A-Fa-f]{40})\s+"([^"\r\n]+)"`)
+	profileUUIDPattern = regexp.MustCompile(`^[0-9A-Fa-f-]{36}$`)
+	buildPattern       = regexp.MustCompile(`^[1-9][0-9]{0,17}(?:\.[1-9][0-9]{0,17}){0,2}$`)
 )
 
 // TestFlightOptions identifies only trusted-runner temporary files. Secret
@@ -209,12 +210,13 @@ func signAdHoc(ctx context.Context, options *AdHocOptions, manifest *ProvenanceM
 	if err != nil {
 		return "", err
 	}
-	if err := rejectNestedApplications(appPath); err != nil {
+	plan, err := planSigning(appPath)
+	if err != nil {
 		return "", err
 	}
 	bundleID, _, err := readAppMetadata(filepath.Join(appPath, "Info.plist"))
-	if err != nil {
-		return "", err
+	if err != nil || bundleID != plan.MainBundleID {
+		return "", fmt.Errorf("read application metadata")
 	}
 	credentials, err := takeAppleCredentials()
 	if err != nil {
@@ -235,6 +237,7 @@ func signAdHoc(ctx context.Context, options *AdHocOptions, manifest *ProvenanceM
 		secretsDir:  secretsDir,
 		privateHome: privateHome,
 		appPath:     appPath,
+		plan:        plan,
 		bundleID:    bundleID,
 		p12Path:     p12Path,
 		profileType: ascAdHocProfileType,
@@ -347,7 +350,8 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 	if err != nil {
 		return err
 	}
-	if err := rejectNestedApplications(appPath); err != nil {
+	plan, err := planSigning(appPath)
+	if err != nil {
 		return err
 	}
 	infoPath := filepath.Join(appPath, "Info.plist")
@@ -375,7 +379,7 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 		}
 		_, _ = fmt.Fprintf(privateLog, "Selected TestFlight build number %s after inspecting App Store Connect.\n", buildNumber)
 	}
-	if err := setBundleBuildNumber(infoPath, buildNumber); err != nil {
+	if err := setPlanBuildNumbers(plan, buildNumber); err != nil {
 		return err
 	}
 	betaGroup, err := betaGroupForBundle(credentials.betaGroups, bundleID)
@@ -402,6 +406,7 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 		secretsDir:  secretsDir,
 		privateHome: privateHome,
 		appPath:     appPath,
+		plan:        plan,
 		bundleID:    bundleID,
 		p12Path:     p12Path,
 		profileType: ascAppStoreProfileType,
@@ -469,6 +474,7 @@ type signRequest struct {
 	privateHome string
 	appPath     string
 	bundleID    string
+	plan        *signingPlan
 	p12Path     string
 	profileType string
 	credentials *appleCredentials
@@ -525,82 +531,81 @@ func signApplicationInPlace(ctx context.Context, req *signRequest) error {
 	if err != nil {
 		return err
 	}
-	publisher := req.publisher
-	var bundleResourceID string
+	var provider profileProvider
 	if credentials.issuerID != "" {
+		publisher := req.publisher
 		if publisher == nil {
 			publisher, err = newAppStoreConnectClient(credentials.apiKeyID, credentials.issuerID, credentials.apiKey)
 			if err != nil {
 				return err
 			}
 		}
-		var downloaded []string
-		bundleResourceID, downloaded, err = downloadASCProvisioningProfiles(ctx, publisher, req.bundleID, req.secretsDir, req.profileType)
-		if err != nil {
-			if len(profilePaths) == 0 {
-				return err
-			}
-			_, _ = fmt.Fprintf(req.privateLog, "App Store Connect profile discovery failed: %v\nTrying protected fallback profiles.\n", err)
-		} else {
-			profilePaths = append(profilePaths, downloaded...)
-		}
+		provider = ascProfileProvider{api: publisher, profileType: req.profileType}
 	}
+	signer := &planSigner{
+		tools: macSigningTools{
+			run: run, workRoot: workRoot, privateHome: req.privateHome, keychainPath: keychainPath,
+			identity: signingIdentity,
+		},
+		provider: provider, static: profilePaths, teamID: credentials.teamID, fingerprint: identityFingerprint,
+		profileType: req.profileType, secretsDir: req.secretsDir, log: req.privateLog,
+		associatedDomains: req.associatedDomains,
+	}
+	return signer.signPlan(ctx, req.plan)
+}
 
-	parseCandidate := func(candidatePath string) (provisioningProfileCandidate, error) {
-		profileOutput, captureErr := run.capture(workRoot, "/usr/bin/security", "cms", "-D", "-i", candidatePath, "-k", keychainPath)
-		if captureErr != nil {
-			return provisioningProfileCandidate{}, captureErr
-		}
-		var parsed provisioningProfile
-		if _, unmarshalErr := plist.Unmarshal(profileOutput, &parsed); unmarshalErr != nil {
-			return provisioningProfileCandidate{}, fmt.Errorf("parse provisioning profile bundle")
-		}
-		return provisioningProfileCandidate{path: candidatePath, profile: parsed}, nil
-	}
+// macSigningTools is the real, macOS-only implementation of signingTools.
+type macSigningTools struct {
+	run          executor
+	workRoot     string
+	privateHome  string
+	keychainPath string
+	identity     string
+}
 
-	candidates := make([]provisioningProfileCandidate, 0, len(profilePaths))
-	for _, candidatePath := range profilePaths {
-		candidate, parseErr := parseCandidate(candidatePath)
-		if parseErr != nil {
-			return parseErr
-		}
-		candidates = append(candidates, candidate)
+func (m macSigningTools) ParseProfile(profilePath string) (provisioningProfile, error) {
+	output, err := m.run.capture(m.workRoot, "/usr/bin/security", "cms", "-D", "-i", profilePath, "-k", m.keychainPath)
+	if err != nil {
+		return provisioningProfile{}, err
 	}
-	selected, selectionErr := selectProvisioningProfile(candidates, credentials.teamID, req.bundleID, identityFingerprint, req.profileType)
-	if selectionErr != nil && publisher != nil && bundleResourceID != "" {
-		createdPath, createErr := createASCProvisioningProfile(ctx, publisher, bundleResourceID, req.bundleID, identityFingerprint, req.secretsDir, req.profileType)
-		if createErr != nil {
-			return createErr
-		}
-		created, parseErr := parseCandidate(createdPath)
-		if parseErr != nil {
-			return parseErr
-		}
-		candidates = append(candidates, created)
-		selected, selectionErr = selectProvisioningProfile(candidates, credentials.teamID, req.bundleID, identityFingerprint, req.profileType)
-		if selectionErr == nil {
-			_, _ = fmt.Fprintf(req.privateLog, "Created a %s provisioning profile through the App Store Connect API.\n", req.profileType)
-		}
+	var parsed provisioningProfile
+	if _, err := plist.Unmarshal(output, &parsed); err != nil {
+		return provisioningProfile{}, fmt.Errorf("parse provisioning profile bundle")
 	}
-	if selectionErr != nil {
-		return selectionErr
+	return parsed, nil
+}
+
+func (m macSigningTools) InstallProfile(profilePath, uuid string) error {
+	if !profileUUIDPattern.MatchString(uuid) {
+		return fmt.Errorf("provisioning profile has an invalid UUID")
 	}
-	profilePath, profile := selected.path, selected.profile
-	if req.profileType == ascAdHocProfileType {
-		_, _ = fmt.Fprintf(req.privateLog, "Ad hoc profile %q provisions %d device(s).\n", profile.Name, len(profile.ProvisionedDevices))
+	return copyPrivateFile(profilePath, filepath.Join(m.privateHome, "Library", "MobileDevice", "Provisioning Profiles", uuid+".mobileprovision"))
+}
+
+func (m macSigningTools) Codesign(target, entitlements string) error {
+	args := []string{"--force", "--sign", m.identity, "--keychain", m.keychainPath, "--timestamp=none"}
+	if entitlements != "" {
+		args = append(args, "--generate-entitlement-der", "--entitlements", entitlements)
 	}
-	installedProfile := filepath.Join(req.privateHome, "Library", "MobileDevice", "Provisioning Profiles", profile.UUID+".mobileprovision")
-	if err := copyPrivateFile(profilePath, installedProfile); err != nil {
-		return fmt.Errorf("install provisioning profile")
-	}
-	if err := copyPrivateFile(profilePath, filepath.Join(req.appPath, "embedded.mobileprovision")); err != nil {
-		return fmt.Errorf("embed provisioning profile")
-	}
-	entitlementsPath := filepath.Join(req.secretsDir, "entitlements.plist")
-	if err := writeSigningEntitlements(entitlementsPath, profile.Entitlements, req.associatedDomains); err != nil {
-		return fmt.Errorf("prepare signing entitlements")
-	}
-	return signApplication(run, req.appPath, signingIdentity, entitlementsPath, keychainPath)
+	return m.run.run(filepath.Dir(target), "/usr/bin/codesign", append(args, target)...)
+}
+
+func (m macSigningTools) Verify(appPath string) error {
+	return m.run.run(filepath.Dir(appPath), "/usr/bin/codesign", "--verify", "--deep", "--strict", appPath)
+}
+
+// ascProfileProvider adapts the App Store Connect helpers to profileProvider.
+type ascProfileProvider struct {
+	api         *appStoreConnectClient
+	profileType string
+}
+
+func (a ascProfileProvider) Candidates(ctx context.Context, bundleID, dir string) (string, []string, error) {
+	return downloadASCProvisioningProfiles(ctx, a.api, bundleID, dir, a.profileType)
+}
+
+func (a ascProfileProvider) Create(ctx context.Context, resourceID, bundleID, fingerprint, dir string) (string, error) {
+	return createASCProvisioningProfile(ctx, a.api, resourceID, bundleID, fingerprint, dir, a.profileType)
 }
 
 // runSensitive runs program with its arguments kept out of the log. The
@@ -765,24 +770,6 @@ func extractUnsignedIPA(ipaPath, destinationRoot string) (string, error) {
 	return apps[0], nil
 }
 
-func rejectNestedApplications(appPath string) error {
-	return filepath.WalkDir(appPath, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == appPath {
-			return nil
-		}
-		name := strings.ToLower(entry.Name())
-		if entry.IsDir() && (strings.HasSuffix(name, ".appex") || strings.HasSuffix(name, ".app") ||
-			strings.HasSuffix(name, ".xpc") || name == "plugins" || name == "watch" ||
-			name == "appclips" || name == "xpcservices") {
-			return fmt.Errorf("embedded applications require separate provisioning profiles and are not supported")
-		}
-		return nil
-	})
-}
-
 func setBundleBuildNumber(infoPath, buildNumber string) error {
 	if !buildPattern.MatchString(buildNumber) {
 		return fmt.Errorf("invalid TestFlight build number")
@@ -819,41 +806,6 @@ func altoolArgs(operation, ipaPath string, credentials *appleCredentials) []stri
 		args = append(args, "--apiIssuer", credentials.issuerID)
 	}
 	return args
-}
-
-func signApplication(run executor, appPath, identity, entitlementsPath, keychainPath string) error {
-	var nested []string
-	err := filepath.WalkDir(appPath, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == appPath {
-			return nil
-		}
-		if entry.IsDir() && strings.HasSuffix(entry.Name(), ".framework") {
-			nested = append(nested, path)
-			return filepath.SkipDir
-		}
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".dylib") {
-			nested = append(nested, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("inspect nested code")
-	}
-	sort.Slice(nested, func(i, j int) bool {
-		return strings.Count(nested[i], string(filepath.Separator)) > strings.Count(nested[j], string(filepath.Separator))
-	})
-	for _, target := range nested {
-		if err := run.run(filepath.Dir(target), "/usr/bin/codesign", "--force", "--sign", identity, "--keychain", keychainPath, "--timestamp=none", target); err != nil {
-			return err
-		}
-	}
-	if err := run.run(filepath.Dir(appPath), "/usr/bin/codesign", "--force", "--sign", identity, "--keychain", keychainPath, "--timestamp=none", "--generate-entitlement-der", "--entitlements", entitlementsPath, appPath); err != nil {
-		return err
-	}
-	return run.run(filepath.Dir(appPath), "/usr/bin/codesign", "--verify", "--deep", "--strict", appPath)
 }
 
 func readAppMetadata(infoPath string) (string, string, error) {

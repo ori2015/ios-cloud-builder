@@ -66,11 +66,15 @@ rejects extra files, symlinks, missing files, manifest/ID/operation/commit/ref
 mismatches, ciphertext changes, non-hosted provenance, or invalid Sigstore
 signatures. After decryption it checks the authenticated plaintext digest before
 reading P12/profile/ASC credentials. It also rejects traversal, special files,
-multiple apps, and embedded applications requiring extra profiles. It
+multiple apps, and any embedded bundle that the nested-bundle planner (below) does not understand. It
 sets a GitHub-run-derived `CFBundleVersion`, signs without executing the app,
 validates the signed IPA with App Store Connect, and uploads it directly to Apple
 before deleting it with the ephemeral runner; only an AGE-encrypted diagnostic log is
 uploaded to GitHub.
+
+### Nested bundles in the signing job
+
+The unsigned `.app` is project-controlled, so its embedded bundles are too. Before any Apple value is read, the signing job (and, earlier, the trusted packaging job) enumerates the app into a plan and rejects anything unexpected: bundles are accepted only in their canonical containers (`PlugIns`, `Watch`, `AppClips`, `XPCServices`, `Frameworks`/dylibs anywhere), unknown containers, wrong-suffix entries, case variants, bundles in unexpected places, symlinks, special files, more than 64 bundles, nesting deeper than four levels, simulator builds and unreadable or oversized `Info.plist` files fail the whole run. The main app's identifier was already verified against the registry in the build job; every nested identifier that receives a profile must be `<main id>.<suffix>` with DNS-like labels and must be unique, so a project cannot obtain a profile or entitlements for another application's Bundle ID by embedding a bundle that claims it. Profiles are looked up and created only for those exact identifiers with the existing certificate-fingerprint, team, expiry, debug and device-list checks. Entitlements come from the matching profile only (plus `get-task-allow=false` and the team identifier when absent); project-declared entitlements are not honoured for nested bundles, so a project cannot widen what a nested bundle is signed with. All subprocesses use fixed argument vectors; plist values are never interpolated into commands. Residual risks: a project can still choose which of its own capabilities (as granted on the registered Bundle IDs) an extension carries, App Group membership depends on portal configuration, and the real `codesign`/ASC behaviour for Watch apps and App Clips is not covered by automated tests on Linux. The credential-free `plan-signing` command runs the same planner locally and is the way to inspect an IPA before dispatching a signed build.
 
 ### Apple credential compromise
 

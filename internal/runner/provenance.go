@@ -163,8 +163,8 @@ func trustedPackageWithPackager(ctx context.Context, options *TrustedPackageOpti
 }
 
 func validateTrustedApplication(appPath string) error {
-	if err := rejectNestedApplications(appPath); err != nil {
-		return err
+	if _, err := planSigning(appPath); err != nil {
+		return fmt.Errorf("validate embedded bundles: %w", err)
 	}
 	infoPath := filepath.Join(appPath, "Info.plist")
 	if _, _, err := readAppMetadata(infoPath); err != nil {
