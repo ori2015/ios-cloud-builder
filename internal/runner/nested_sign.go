@@ -63,8 +63,8 @@ func (s *planSigner) signPlan(ctx context.Context, plan *signingPlan) error {
 	}
 	granted := map[string]int{} // bundle id -> number of App Groups, for the consistency note
 	index := 0
-	for _, step := range plan.Steps {
-		step := step
+	for stepIndex := range plan.Steps {
+		step := &plan.Steps[stepIndex]
 		if !step.NeedsProfile {
 			if err := s.tools.Codesign(step.Path, ""); err != nil {
 				return err
@@ -72,7 +72,7 @@ func (s *planSigner) signPlan(ctx context.Context, plan *signingPlan) error {
 			continue
 		}
 		index++
-		selected, err := s.profileFor(ctx, &step, index, staticCandidates)
+		selected, err := s.profileFor(ctx, step, index, staticCandidates)
 		if err != nil {
 			return fmt.Errorf("%s %s: %w", step.Kind, step.RelPath, err)
 		}

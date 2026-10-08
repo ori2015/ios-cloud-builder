@@ -543,7 +543,7 @@ func signApplicationInPlace(ctx context.Context, req *signRequest) error {
 		provider = ascProfileProvider{api: publisher, profileType: req.profileType}
 	}
 	signer := &planSigner{
-		tools: macSigningTools{
+		tools: &macSigningTools{
 			run: run, workRoot: workRoot, privateHome: req.privateHome, keychainPath: keychainPath,
 			identity: signingIdentity,
 		},
@@ -563,7 +563,7 @@ type macSigningTools struct {
 	identity     string
 }
 
-func (m macSigningTools) ParseProfile(profilePath string) (provisioningProfile, error) {
+func (m *macSigningTools) ParseProfile(profilePath string) (provisioningProfile, error) {
 	output, err := m.run.capture(m.workRoot, "/usr/bin/security", "cms", "-D", "-i", profilePath, "-k", m.keychainPath)
 	if err != nil {
 		return provisioningProfile{}, err
@@ -575,14 +575,14 @@ func (m macSigningTools) ParseProfile(profilePath string) (provisioningProfile, 
 	return parsed, nil
 }
 
-func (m macSigningTools) InstallProfile(profilePath, uuid string) error {
+func (m *macSigningTools) InstallProfile(profilePath, uuid string) error {
 	if !profileUUIDPattern.MatchString(uuid) {
 		return fmt.Errorf("provisioning profile has an invalid UUID")
 	}
 	return copyPrivateFile(profilePath, filepath.Join(m.privateHome, "Library", "MobileDevice", "Provisioning Profiles", uuid+".mobileprovision"))
 }
 
-func (m macSigningTools) Codesign(target, entitlements string) error {
+func (m *macSigningTools) Codesign(target, entitlements string) error {
 	args := []string{"--force", "--sign", m.identity, "--keychain", m.keychainPath, "--timestamp=none"}
 	if entitlements != "" {
 		args = append(args, "--generate-entitlement-der", "--entitlements", entitlements)
@@ -590,7 +590,7 @@ func (m macSigningTools) Codesign(target, entitlements string) error {
 	return m.run.run(filepath.Dir(target), "/usr/bin/codesign", append(args, target)...)
 }
 
-func (m macSigningTools) Verify(appPath string) error {
+func (m *macSigningTools) Verify(appPath string) error {
 	return m.run.run(filepath.Dir(appPath), "/usr/bin/codesign", "--verify", "--deep", "--strict", appPath)
 }
 

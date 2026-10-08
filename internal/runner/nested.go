@@ -288,7 +288,7 @@ func (p *planner) walkBundle(self *signingTarget, depth int) ([]signingTarget, e
 
 func isContainerVariant(lower string) bool {
 	for name := range containerSuffix {
-		if strings.ToLower(name) == lower {
+		if strings.EqualFold(name, lower) {
 			return true
 		}
 	}
@@ -406,7 +406,8 @@ func (p *signingPlan) render(w io.Writer, profileType string) {
 	_, _ = fmt.Fprintf(w, "Application bundle identifier: %s\n", p.MainBundleID)
 	_, _ = fmt.Fprintf(w, "Signing order (inside-out), %d step(s):\n", len(p.Steps))
 	profiles := 0
-	for index, step := range p.Steps {
+	for index := range p.Steps {
+		step := &p.Steps[index]
 		line := fmt.Sprintf("  %2d. %-14s %s", index+1, step.Kind, step.RelPath)
 		if step.BundleID != "" {
 			line += "  id=" + step.BundleID

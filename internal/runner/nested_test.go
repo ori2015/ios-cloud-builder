@@ -67,7 +67,8 @@ func (f *fixture) plan() (*signingPlan, error) { return planSigning(f.app) }
 
 func stepNames(plan *signingPlan) []string {
 	var out []string
-	for _, step := range plan.Steps {
+	for index := range plan.Steps {
+		step := &plan.Steps[index]
 		out = append(out, string(step.Kind)+":"+step.RelPath)
 	}
 	return out
@@ -122,7 +123,8 @@ func TestPlanWatchAppClipAndNestedExtensions(t *testing.T) {
 	if got := stepNames(plan); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("order = %v\nwant    %v", got, want)
 	}
-	for _, step := range plan.Steps {
+	for stepIndex := range plan.Steps {
+		step := &plan.Steps[stepIndex]
 		wantPlatform := platformIOS
 		if strings.HasPrefix(step.RelPath, "Watch/") {
 			wantPlatform = platformWatchOS
@@ -408,7 +410,8 @@ func (p *fakeProvider) Candidates(_ context.Context, bundleID, dir string) (stri
 		return "", nil, errors.New("no exact iOS-compatible bundle identifier exists in App Store Connect")
 	}
 	var paths []string
-	for i, profile := range p.existing[bundleID] {
+	for i := range p.existing[bundleID] {
+		profile := p.existing[bundleID][i]
 		path := filepath.Join(dir, fmt.Sprintf("asc-%d.mobileprovision", i))
 		if err := os.WriteFile(path, []byte("profile"), 0o600); err != nil {
 			return "", nil, err
@@ -473,10 +476,10 @@ func TestSignPlanSignsInsideOutWithPerBundleProfiles(t *testing.T) {
 		t.Fatalf("verified %q", tools.verified)
 	}
 	// Frameworks: identity only, no profile, no entitlements.
-	if tools.ents[filepath.Join(f.app, "Frameworks/Lib.framework")] != "" {
+	if tools.ents[filepath.Join(f.app, "Frameworks", "Lib.framework")] != "" {
 		t.Fatal("framework signed with entitlements")
 	}
-	if _, err := os.Stat(filepath.Join(f.app, "Frameworks/Lib.framework/embedded.mobileprovision")); err == nil {
+	if _, err := os.Stat(filepath.Join(f.app, "Frameworks", "Lib.framework", "embedded.mobileprovision")); err == nil {
 		t.Fatal("framework received a provisioning profile")
 	}
 	for _, rel := range []string{"embedded.mobileprovision", "PlugIns/Widget.appex/embedded.mobileprovision"} {
@@ -523,7 +526,7 @@ func TestSignPlanDerivesEntitlementsFromEachProfile(t *testing.T) {
 		fmt.Sprint(app["com.apple.security.application-groups"]) != "[group.main]" {
 		t.Fatalf("app entitlements = %v", app)
 	}
-	widget := readEntitlements(t, tools.ents[filepath.Join(f.app, "PlugIns/Widget.appex")])
+	widget := readEntitlements(t, tools.ents[filepath.Join(f.app, "PlugIns", "Widget.appex")])
 	if widget["application-identifier"] != "TEAM123456."+testMainID+".widget" || widget["get-task-allow"] != false ||
 		widget["com.apple.developer.team-identifier"] != "TEAM123456" || fmt.Sprint(widget["com.apple.security.application-groups"]) != "[group.widget]" {
 		t.Fatalf("widget entitlements = %v", widget)
