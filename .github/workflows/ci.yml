@@ -32,6 +32,12 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      # The runner's end-to-end tests build a generic fixture with xcodebuild and
+      # inspect the resulting IPA. They skip themselves wherever Xcode is absent.
+      - name: Install XcodeGen
+        if: runner.os == 'macOS'
+        run: brew install xcodegen
+
       - name: Run tests
         run: go test -v -race ./...
 
