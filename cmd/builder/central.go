@@ -12,6 +12,7 @@ import (
 	"github.com/MobAI-App/ios-builder/internal/auth"
 	"github.com/MobAI-App/ios-builder/internal/config"
 	"github.com/MobAI-App/ios-builder/internal/github"
+	"github.com/MobAI-App/ios-builder/internal/projectdetect"
 	"github.com/MobAI-App/ios-builder/internal/registry"
 	"github.com/MobAI-App/ios-builder/internal/security"
 	"github.com/MobAI-App/ios-builder/internal/snapshot"
@@ -47,6 +48,7 @@ func init() {
 	centralSetupCmd.Flags().String("builder", "", "Public builder repository as OWNER/REPO (required)")
 	centralSetupCmd.Flags().StringP("remote", "r", "origin", "Private source git remote")
 	centralSetupCmd.Flags().StringP("project", "p", "", "Project name (defaults to directory name)")
+	centralSetupCmd.Flags().String("app-path", "", "Folder holding the app's pubspec.yaml, package.json or Xcode project (auto-detected; needed only when the repo holds several apps)")
 	centralSetupCmd.Flags().String("ios-path", "", "Relative path to the iOS project (auto-detected)")
 	centralSetupCmd.Flags().String("scheme", "", "Xcode scheme (auto-detected when empty)")
 	centralSetupCmd.Flags().String("configuration", "Debug", "Build configuration: Debug or Release")
@@ -79,8 +81,29 @@ func runCentralSetup(cmd *cobra.Command, _ []string) error {
 		project = filepath.Base(cwd)
 	}
 	iosPath, _ := cmd.Flags().GetString("ios-path")
-	if iosPath == "" {
-		iosPath, _ = detectIOSPath()
+	appPath, _ := cmd.Flags().GetString("app-path")
+	var detected *projectdetect.Layout
+	if iosPath == "" || appPath == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		detected, err = projectdetect.Resolve(cwd, appPath)
+		if err != nil {
+			return err
+		}
+		if appPath == "" {
+			appPath = detected.AppPath
+		}
+		if iosPath == "" {
+			iosPath = detected.IOSPath
+		}
+	}
+	if appPath == "." {
+		appPath = ""
+	}
+	if iosPath == "." {
+		iosPath = ""
 	}
 	scheme, _ := cmd.Flags().GetString("scheme")
 	configuration, _ := cmd.Flags().GetString("configuration")
@@ -112,7 +135,7 @@ func runCentralSetup(cmd *cobra.Command, _ []string) error {
 		GitHub:            config.GitHubConfig{Owner: sourceOwner, Repo: sourceRepo},
 		Builder:           config.BuilderConfig{Owner: parts[0], Repo: parts[1], Workflow: config.DefaultWorkflow},
 		Security:          config.SecurityConfig{Recipient: recipient},
-		IOS:               config.IOSConfig{Path: iosPath, Scheme: scheme, Configuration: configuration},
+		IOS:               config.IOSConfig{Path: iosPath, AppPath: appPath, Scheme: scheme, Configuration: configuration},
 		ReactNative:       config.ReactNativeConfig{Expo: isExpoProject()},
 	}
 	if isFlutterProject() {
@@ -198,7 +221,7 @@ func runCentralRegister(cmd *cobra.Command, _ []string) error {
 	}
 	cfg.GitHub.Owner, cfg.GitHub.Repo = canonical[0], canonical[1]
 	project := registry.Project{
-		Owner: cfg.GitHub.Owner, Repo: cfg.GitHub.Repo, BundleID: bundleID, IOSPath: iosPath,
+		Owner: cfg.GitHub.Owner, Repo: cfg.GitHub.Repo, BundleID: bundleID, AppPath: cfg.IOS.AppPath, IOSPath: iosPath,
 		Scheme: cfg.IOS.Scheme, Configuration: configuration, FrameworkHint: centralFrameworkHint(cfg),
 		SnapshotNamespace: cfg.SnapshotNamespace,
 	}

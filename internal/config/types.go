@@ -82,7 +82,10 @@ type KMPConfig struct {
 type IOSConfig struct {
 	// Path to iOS project relative to repo root (e.g., "ios" for React Native, "platforms/ios" for Cordova)
 	// Empty means root directory contains the Xcode project
-	Path          string `json:"path,omitempty"`
+	Path string `json:"path,omitempty"`
+	// AppPath is the folder (relative to the repo root) holding the app's
+	// pubspec.yaml, package.json or Xcode project; empty means it is derived from Path.
+	AppPath       string `json:"appPath,omitempty"`
 	Scheme        string `json:"scheme,omitempty"`        // Xcode scheme to build (auto-detected if empty)
 	Signing       bool   `json:"signing,omitempty"`       // Whether code signing is configured
 	Configuration string `json:"configuration,omitempty"` // Build configuration: Debug (faster) or Release (production)
@@ -187,6 +190,9 @@ func (c *Config) Validate() error {
 	}
 	if !validIOSPath(c.IOS.Path) {
 		return &ValidationError{Field: "ios.path", Message: "must be a clean relative path without traversal or backslashes"}
+	}
+	if !validIOSPath(c.IOS.AppPath) {
+		return &ValidationError{Field: "ios.appPath", Message: "must be a clean relative path without traversal or backslashes"}
 	}
 	if !schemePattern.MatchString(c.IOS.Scheme) {
 		return &ValidationError{Field: "ios.scheme", Message: "contains unsupported characters or is too long"}

@@ -111,3 +111,31 @@ func TestE2EUnsignedNativeBuildProducesValidIPA(t *testing.T) {
 		t.Fatalf("unexpected application: %+v", info)
 	}
 }
+
+// A monorepo keeps the app in a subfolder. The pipeline must find the project
+// there without the checkout root holding any manifest.
+func TestE2EUnsignedBuildOfAppInSubfolder(t *testing.T) {
+	requireXcodeToolchain(t)
+	root := t.TempDir()
+	writeGenericApp(t, root, "apps/mobile", "example.generic.sub")
+	info := buildFixture(t, root, &BuildOptions{
+		Framework: FrameworkNative, AppPath: "apps/mobile", IOSPath: "apps/mobile", BundleID: "example.generic.sub",
+	})
+	if info.BundleID != "example.generic.sub" {
+		t.Fatalf("unexpected application: %+v", info)
+	}
+}
+
+// A committed .xcworkspace that names an .xcodeproj which is not in git (it is
+// generated) must not stop XcodeGen from running.
+func TestE2EXcodeGenRunsBesideDanglingWorkspaceStub(t *testing.T) {
+	requireXcodeToolchain(t)
+	root := t.TempDir()
+	writeGenericApp(t, root, ".", "example.generic.stub")
+	writeFile(t, root, "GenericApp.xcworkspace/contents.xcworkspacedata",
+		`<?xml version="1.0" encoding="UTF-8"?><Workspace version = "1.0"><FileRef location = "group:GenericApp.xcodeproj"></FileRef></Workspace>`)
+	info := buildFixture(t, root, &BuildOptions{Framework: FrameworkNative, IOSPath: ".", BundleID: "example.generic.stub"})
+	if info.BundleID != "example.generic.stub" {
+		t.Fatalf("unexpected application: %+v", info)
+	}
+}

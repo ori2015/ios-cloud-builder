@@ -275,3 +275,16 @@ func TestConfig_RepositoryModeDoesNotRequireCentralFields(t *testing.T) {
 		t.Fatalf("Validate() error = %v", err)
 	}
 }
+
+func TestValidateAppPath(t *testing.T) {
+	for _, tc := range []struct {
+		appPath string
+		ok      bool
+	}{{"", true}, {"apps/mobile", true}, {"../x", false}, {"/abs", false}, {`a\b`, false}} {
+		cfg := &Config{Project: "p", GitHub: GitHubConfig{Owner: "o", Repo: "r"}, IOS: IOSConfig{AppPath: tc.appPath}}
+		err := cfg.Validate()
+		if (err == nil) != tc.ok {
+			t.Errorf("appPath %q: err = %v, want ok=%v", tc.appPath, err, tc.ok)
+		}
+	}
+}

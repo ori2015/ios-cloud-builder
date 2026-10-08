@@ -115,10 +115,12 @@ jobs:
         id: detect
         env:
           FRAMEWORK_HINT: ${{ steps.project.outputs.framework_hint }}
+          APP_PATH: ${{ steps.project.outputs.app_path }}
         run: |
           echo "Preparing framework toolchain"
           "$RUNNER_TEMP/builder-runner" detect \
             --source "$GITHUB_WORKSPACE/source" \
+            --app-path "$APP_PATH" \
             --framework "$FRAMEWORK_HINT" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
@@ -159,6 +161,7 @@ jobs:
         id: secure-build
         continue-on-error: true
         env:
+          APP_PATH: ${{ steps.project.outputs.app_path }}
           IOS_PATH: ${{ steps.project.outputs.ios_path }}
           SCHEME: ${{ steps.project.outputs.scheme }}
           CONFIGURATION: ${{ steps.project.outputs.configuration }}
@@ -175,6 +178,7 @@ jobs:
           if [ "$OPERATION" = "test" ]; then intermediate=(--run-tests); fi
           "$RUNNER_TEMP/builder-runner" execute \
             --source "$GITHUB_WORKSPACE/source" \
+            --app-path "$APP_PATH" \
             --ios-path "$IOS_PATH" \
             --scheme "$SCHEME" \
             --configuration "$CONFIGURATION" \

@@ -113,10 +113,10 @@ func ResolveProject(in *Inputs, registryJSON, outputPath string, commands io.Wri
 	}
 	values := map[string]string{
 		"source_owner": project.Owner, "source_repo": project.Repo, "snapshot_ref": snapshotRef,
-		"ios_path": project.IOSPath, "scheme": project.Scheme, "configuration": configuration,
+		"app_path": project.AppPath, "ios_path": project.IOSPath, "scheme": project.Scheme, "configuration": configuration,
 		"framework_hint": project.FrameworkHint, "bundle_id": project.BundleID,
 	}
-	for _, name := range []string{"source_owner", "source_repo", "snapshot_ref", "ios_path", "scheme", "configuration", "framework_hint", "bundle_id"} {
+	for _, name := range []string{"source_owner", "source_repo", "snapshot_ref", "app_path", "ios_path", "scheme", "configuration", "framework_hint", "bundle_id"} {
 		if _, err := fmt.Fprintf(output, "%s=%s\n", name, values[name]); err != nil {
 			return fmt.Errorf("write trusted project outputs")
 		}

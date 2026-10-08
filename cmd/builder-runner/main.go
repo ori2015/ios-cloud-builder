@@ -280,13 +280,14 @@ func revokeToken() error {
 
 func detect(args []string) error {
 	flags := newFlags("detect")
-	var source, hint string
+	var source, hint, appPath string
 	flags.StringVar(&source, "source", "", "")
 	flags.StringVar(&hint, "framework", "", "")
+	flags.StringVar(&appPath, "app-path", "", "")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || !filepath.IsAbs(source) {
 		return fmt.Errorf("invalid framework detection arguments")
 	}
-	framework, err := runner.DetectFramework(source, hint)
+	framework, err := runner.DetectFrameworkAt(source, appPath, hint)
 	if err != nil {
 		return fmt.Errorf("framework detection failed")
 	}
@@ -329,6 +330,7 @@ func execute(args []string) error {
 	var projectIntermediate bool
 	flags.StringVar(&options.SourceRoot, "source", "", "")
 	flags.StringVar(&options.IOSPath, "ios-path", "", "")
+	flags.StringVar(&options.AppPath, "app-path", "", "")
 	flags.StringVar(&options.Scheme, "scheme", "", "")
 	flags.StringVar(&options.Configuration, "configuration", "", "")
 	flags.StringVar(&options.Framework, "framework", "", "")
