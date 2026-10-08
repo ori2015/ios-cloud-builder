@@ -24,7 +24,8 @@ func DetectFramework(sourceRoot, hint string) (string, error) {
 		return FrameworkExpo, nil
 	case bytes.Contains(pkg, []byte(`"react-native"`)):
 		return FrameworkReactNative, nil
-	case bytes.Contains(pkg, []byte(`"@ionic/`)) || bytes.Contains(pkg, []byte(`"ionic"`)):
+	case bytes.Contains(pkg, []byte(`"@ionic/`)) || bytes.Contains(pkg, []byte(`"ionic"`)) ||
+		(bytes.Contains(pkg, []byte(`"@capacitor/ios"`)) && isCapacitorProject(sourceRoot)):
 		return FrameworkIonic, nil
 	case bytes.Contains(pkg, []byte(`"cordova"`)) || exists(filepath.Join(sourceRoot, "config.xml")):
 		return FrameworkCordova, nil
