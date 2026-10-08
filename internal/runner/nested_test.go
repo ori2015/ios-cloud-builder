@@ -81,7 +81,7 @@ func TestPlanSingleAppHasOneStep(t *testing.T) {
 	}
 }
 
-func TestPlanFlowSipLayoutSignsInsideOut(t *testing.T) {
+func TestPlanExtensionLayoutSignsInsideOut(t *testing.T) {
 	f := newFixture(t)
 	f.appex("PlugIns/Widget.appex", testMainID+".widget", "com.apple.widgetkit-extension")
 	f.bundle("Frameworks/Lib.framework", map[string]any{"CFBundleIdentifier": "org.vendor.lib"})
