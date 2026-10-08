@@ -215,17 +215,18 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 	}
 	var appPath string
 	if options.Framework == FrameworkFlutter {
-		if err := run.run(sourceRoot, "flutter", "pub", "get"); err != nil {
+		flutterRoot := flutterProjectRoot(sourceRoot, iosRoot)
+		if err := run.run(flutterRoot, "flutter", "pub", "get"); err != nil {
 			return err
 		}
 		mode := "--release"
 		if options.Configuration == "Debug" {
 			mode = "--debug"
 		}
-		if err := run.run(sourceRoot, "flutter", "build", "ios", mode, "--no-codesign"); err != nil {
+		if err := run.run(flutterRoot, "flutter", "build", "ios", mode, "--no-codesign"); err != nil {
 			return err
 		}
-		appPath, err = findApp(filepath.Join(sourceRoot, "build", "ios", "iphoneos"))
+		appPath, err = findApp(filepath.Join(flutterRoot, "build", "ios", "iphoneos"))
 	} else {
 		if options.Framework == FrameworkKMP {
 			if err := makeGradleWrapperExecutable(sourceRoot); err != nil {
@@ -364,6 +365,17 @@ func installNodeDependencies(run executor, root string) error {
 	default:
 		return run.run(root, "npm", "install")
 	}
+}
+
+// flutterProjectRoot returns the directory that holds the Flutter app's
+// pubspec.yaml: the parent of the iOS directory when it has one (a monorepo
+// keeps the app in a subdirectory such as app/ios), otherwise the checkout root.
+func flutterProjectRoot(sourceRoot, iosRoot string) string {
+	parent := filepath.Dir(iosRoot)
+	if parent != sourceRoot && pathWithin(sourceRoot, parent) && exists(filepath.Join(parent, "pubspec.yaml")) {
+		return parent
+	}
+	return sourceRoot
 }
 
 func findXcodeContainer(iosRoot string) (workspace, project string, err error) {
