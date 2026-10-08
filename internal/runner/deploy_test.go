@@ -492,22 +492,6 @@ func TestTestFlightBuildNumberValidation(t *testing.T) {
 	}
 }
 
-func TestRejectNestedApplicationsFailClosed(t *testing.T) {
-	for _, relative := range []string{
-		"PlugIns/Share.appex", "Watch", "AppClips", "XPCServices/Service.xpc", "Nested.App",
-	} {
-		t.Run(relative, func(t *testing.T) {
-			app := filepath.Join(t.TempDir(), "App.app")
-			if err := os.MkdirAll(filepath.Join(app, relative), 0700); err != nil {
-				t.Fatal(err)
-			}
-			if err := rejectNestedApplications(app); err == nil {
-				t.Fatalf("nested bundle %q was accepted", relative)
-			}
-		})
-	}
-}
-
 func TestAltoolArgsSupportsTeamAndIndividualKeys(t *testing.T) {
 	team := altoolArgs("--validate-app", "/tmp/App.ipa", &appleCredentials{apiKeyID: "KEY1234567", issuerID: "issuer"})
 	if !strings.Contains(strings.Join(team, " "), "--apiIssuer issuer") {

@@ -49,6 +49,8 @@ func run(args []string) error {
 		return deployTestFlight(args[1:])
 	case "sign-adhoc":
 		return signAdHoc(args[1:])
+	case "plan-signing":
+		return planSigning(args[1:])
 	default:
 		return fmt.Errorf("unknown builder-runner subcommand")
 	}
@@ -201,6 +203,21 @@ func signAdHoc(args []string) error {
 	}
 	fmt.Println("Ad hoc signing completed; encrypted signed IPA is ready")
 	return nil
+}
+
+// planSigning prints the nested-bundle signing plan for an unsigned IPA. It
+// needs no credentials, makes no network requests and runs nothing from the IPA.
+func planSigning(args []string) error {
+	flags := newFlags("plan-signing")
+	var options runner.PlanSigningOptions
+	flags.StringVar(&options.IPAPath, "ipa", "", "absolute path of an unsigned IPA")
+	flags.StringVar(&options.ExpectedBundleID, "expected-bundle-id", "", "fail unless the application has this bundle identifier")
+	flags.BoolVar(&options.AdHoc, "adhoc", false, "show ad hoc instead of App Store profile requirements")
+	flags.BoolVar(&options.JSON, "json", false, "print the plan as JSON")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		return fmt.Errorf("invalid signing plan arguments")
+	}
+	return runner.PlanSigning(&options, os.Stdout)
 }
 
 func newFlags(name string) *flag.FlagSet {
