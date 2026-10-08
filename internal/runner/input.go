@@ -126,7 +126,7 @@ func ResolveProject(in *Inputs, registryJSON, outputPath string, commands io.Wri
 }
 
 func validateRelativePath(value string) error {
-	if value == "" || filepath.IsAbs(value) || strings.ContainsAny(value, "\x00\r\n") || strings.Contains(value, `\`) {
+	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "/") || strings.ContainsAny(value, "\x00\r\n") || strings.Contains(value, `\`) {
 		return fmt.Errorf("must be a non-empty portable relative path")
 	}
 	// Registry paths are slash-separated on every platform.
