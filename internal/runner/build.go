@@ -194,10 +194,17 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 		iosRoot = filepath.Join(sourceRoot, "platforms", "ios")
 	case FrameworkIonic:
 		if isCapacitorProject(sourceRoot) {
+			// The web assets (webDir) are build output, not committed; cap sync copies them.
+			if err := run.run(sourceRoot, "npm", "run", "build", "--if-present"); err != nil {
+				return err
+			}
 			if err := run.run(sourceRoot, "npx", "--no-install", "cap", "sync", "ios"); err != nil {
 				return err
 			}
-			iosRoot = filepath.Join(sourceRoot, "ios")
+			// Keep the registered iOS path (Capacitor 3+ projects live in ios/App).
+			if iosPath := strings.TrimSpace(options.IOSPath); iosPath == "" || iosPath == "." {
+				iosRoot = filepath.Join(sourceRoot, "ios")
+			}
 		} else {
 			if err := run.run(sourceRoot, "npx", "--no-install", "ionic", "cordova", "prepare", "ios"); err != nil {
 				return err
