@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -128,7 +129,8 @@ func validateRelativePath(value string) error {
 	if value == "" || filepath.IsAbs(value) || strings.ContainsAny(value, "\x00\r\n") || strings.Contains(value, `\`) {
 		return fmt.Errorf("must be a non-empty portable relative path")
 	}
-	clean := filepath.Clean(value)
+	// Registry paths are slash-separated on every platform.
+	clean := path.Clean(value)
 	if clean != value || clean == ".." || strings.HasPrefix(clean, "../") {
 		return fmt.Errorf("must be clean and remain inside the checkout")
 	}
