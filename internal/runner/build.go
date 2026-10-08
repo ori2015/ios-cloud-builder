@@ -310,7 +310,13 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 	if err != nil {
 		return fmt.Errorf("resolve built application: %w", err)
 	}
-	if !pathWithin(sourceRoot, appPath) && !pathWithin(filepath.Dir(options.LogPath), appPath) {
+	// appPath was symlink-resolved above, so the output root must be too: on macOS
+	// the temporary directory sits behind /var -> /private/var.
+	outputRoot, err := filepath.EvalSymlinks(filepath.Dir(options.LogPath))
+	if err != nil {
+		return fmt.Errorf("resolve private output directory: %w", err)
+	}
+	if !pathWithin(sourceRoot, appPath) && !pathWithin(outputRoot, appPath) {
 		return fmt.Errorf("built application escaped trusted output roots")
 	}
 	if err := verifyBuiltBundleID(appPath, options.BundleID); err != nil {
