@@ -134,11 +134,25 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Read the project's Flutter version pin
+        id: flutter-pin
+        if: steps.detect.outputs.framework == 'flutter'
+        run: |
+          # Optional `.flutter-version` at the repository root (a plain x.y.z). Anything else is ignored and
+          # the latest stable Flutter is used, as before. The value is a public version number, not a secret.
+          version=""
+          if [ -f "$GITHUB_WORKSPACE/source/.flutter-version" ]; then
+            candidate="$(head -n 1 "$GITHUB_WORKSPACE/source/.flutter-version" | tr -d '[:space:]')"
+            if printf '%s' "$candidate" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then version="$candidate"; fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Set up Flutter
         if: steps.detect.outputs.framework == 'flutter'
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with:
           channel: stable
+          flutter-version: ${{ steps.flutter-pin.outputs.version }}
           cache: false
 
       - name: Build unsigned IPA and encrypt private outputs
