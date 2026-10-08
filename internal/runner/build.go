@@ -180,13 +180,22 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 	env := ChildEnvironment(sourceRoot, privateHome)
 	run := executor{ctx: ctx, env: env, log: privateLog}
 
+	appRoot := nodeProjectRoot(sourceRoot, options.IOSPath)
 	if isNodeFramework(options.Framework) {
-		if err := installNodeDependencies(run, sourceRoot); err != nil {
+		if err := installNodeDependencies(run, appRoot); err != nil {
 			return err
 		}
 	}
 	iosRoot := filepath.Join(sourceRoot, options.IOSPath)
 	switch options.Framework {
+	case FrameworkExpo:
+		// Managed Expo projects commit no ios/ directory; prebuild generates it (and runs pod install).
+		if err := run.run(appRoot, "npx", "--no-install", "expo", "prebuild", "--platform", "ios"); err != nil {
+			return err
+		}
+		if iosPath := strings.TrimSpace(options.IOSPath); iosPath == "" || iosPath == "." {
+			iosRoot = filepath.Join(appRoot, "ios")
+		}
 	case FrameworkCordova:
 		if err := run.run(sourceRoot, "npx", "--no-install", "cordova", "prepare", "ios"); err != nil {
 			return err
@@ -380,6 +389,17 @@ func installNodeDependencies(run executor, root string) error {
 func flutterProjectRoot(sourceRoot, iosRoot string) string {
 	parent := filepath.Dir(iosRoot)
 	if parent != sourceRoot && pathWithin(sourceRoot, parent) && exists(filepath.Join(parent, "pubspec.yaml")) {
+		return parent
+	}
+	return sourceRoot
+}
+
+// nodeProjectRoot returns the directory holding the JavaScript app's
+// package.json: the parent of the iOS directory when it has one (the app lives
+// in a subdirectory such as app/ios), otherwise the checkout root.
+func nodeProjectRoot(sourceRoot, iosPath string) string {
+	parent := filepath.Dir(filepath.Join(sourceRoot, iosPath))
+	if parent != sourceRoot && pathWithin(sourceRoot, parent) && exists(filepath.Join(parent, "package.json")) {
 		return parent
 	}
 	return sourceRoot
