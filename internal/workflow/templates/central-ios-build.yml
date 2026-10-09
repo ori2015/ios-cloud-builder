@@ -134,6 +134,21 @@ jobs:
             --source "$GITHUB_WORKSPACE/source" \
             --app-path "$APP_PATH" >> "$GITHUB_OUTPUT"
 
+      - name: Install the Godot editor and export templates
+        id: godot
+        if: steps.detect.outputs.framework == 'godot'
+        env:
+          GODOT_VERSION: ${{ steps.tools.outputs.godot_version }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # Trusted download, verified against the release's SHA512-SUMS, into a folder outside the private checkout.
+          if [ -z "$GODOT_VERSION" ]; then
+            echo "::error::No Godot version found. Add a .godot-version file (for example 4.4.1) or keep config/features in project.godot."
+            exit 1
+          fi
+          "$GITHUB_WORKSPACE/builder/scripts/install-godot.sh" "$GODOT_VERSION" "$RUNNER_TEMP/godot"
+          echo "dir=$RUNNER_TEMP/godot" >> "$GITHUB_OUTPUT"
+
       - name: Select the project's Xcode version
         if: steps.tools.outputs.xcode_version != ''
         env:
@@ -152,10 +167,16 @@ jobs:
           echo "DEVELOPER_DIR=$app/Contents/Developer" >> "$GITHUB_ENV"
 
       - name: Set up Node.js
-        if: steps.detect.outputs.framework == 'react-native' || steps.detect.outputs.framework == 'expo' || steps.detect.outputs.framework == 'cordova' || steps.detect.outputs.framework == 'ionic' || steps.detect.outputs.framework == 'tauri' || steps.detect.outputs.framework == 'nativescript'
+        if: steps.detect.outputs.framework == 'react-native' || steps.detect.outputs.framework == 'expo' || steps.detect.outputs.framework == 'cordova' || steps.detect.outputs.framework == 'ionic' || steps.detect.outputs.framework == 'tauri' || steps.detect.outputs.framework == 'nativescript' || steps.detect.outputs.framework == 'sparkling'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: ${{ steps.tools.outputs.node_version || '20' }}
+
+      - name: Install Tauri iOS prerequisites
+        if: steps.detect.outputs.framework == 'tauri'
+        run: |
+          # The Tauri CLI would otherwise run brew itself inside the isolated build.
+          brew install xcodegen libimobiledevice
 
       - name: Set up Java for Kotlin Multiplatform
         if: steps.detect.outputs.framework == 'kmp'
@@ -177,6 +198,7 @@ jobs:
         continue-on-error: true
         env:
           APP_PATH: ${{ steps.project.outputs.app_path }}
+          GODOT_DIR: ${{ steps.godot.outputs.dir }}
           IOS_PATH: ${{ steps.project.outputs.ios_path }}
           SCHEME: ${{ steps.project.outputs.scheme }}
           CONFIGURATION: ${{ steps.project.outputs.configuration }}
@@ -194,6 +216,7 @@ jobs:
           "$RUNNER_TEMP/builder-runner" execute \
             --source "$GITHUB_WORKSPACE/source" \
             --app-path "$APP_PATH" \
+            --godot-dir "$GODOT_DIR" \
             --ios-path "$IOS_PATH" \
             --scheme "$SCHEME" \
             --configuration "$CONFIGURATION" \

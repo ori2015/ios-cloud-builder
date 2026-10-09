@@ -147,6 +147,31 @@ internal/
 - **KMP Has No Hot Reload**: shared Kotlin compiles to a native framework at build time, so
   `dev kmp` only installs, launches and streams output; code changes need `ios build`
 
+## Supported frameworks (unsigned central builds)
+
+`builder central detect` shows what setup/register read from a project; `scripts/verify-matrix.sh`
+checks detection on generic fixtures. Each framework below is built by the **Real build** CI job,
+which scaffolds a project with the framework's own generator, runs the production unsigned pipeline
+and validates the IPA (`internal/ipacheck`) — see `internal/runner/e2e_frameworks_test.go`.
+
+| Framework | Generate step | Notes |
+|---|---|---|
+| Native / XcodeGen | `xcodegen generate` when only `project.yml` exists | stub `.xcworkspace` files are ignored |
+| Flutter | `flutter pub get`, `flutter build ios --no-codesign` | version from `.flutter-version`/`.fvmrc` |
+| Expo (managed) | `expo prebuild --platform ios` | Expo with a committed `ios/` builds as React Native; the newest SDK may need a newer Xcode than the runner has |
+| React Native | `pod install` | |
+| Capacitor / Ionic | web build script (`build`, `build:web`), `cap sync ios` | `webDir` must contain `index.html` afterwards |
+| Cordova | `cordova prepare ios` | |
+| Tauri 2 | `tauri ios init` (if `gen/apple` is not committed), `tauri ios build --ci --no-sign` | produces the IPA itself |
+| NativeScript | `nativescript prepare ios` | |
+| Sparkling (Lynx) | `npm run build` (`sparkling-app-cli build --copy`) | committed `ios/` project |
+| .NET MAUI | `dotnet workload restore`, `dotnet publish -p:EnableCodeSigning=false -p:BuildIpa=true` | .NET 8 verified; the newest iOS workload can need a newer Xcode than the runner has (explained in the log) |
+| Godot 4 | headless iOS export to an Xcode project (`scripts/install-godot.sh` installs the editor) | needs an iOS export preset; ETC2/ASTC import is enabled in the checkout |
+| KMP | Gradle via the Xcode build phase | detected and built, but **not** covered by a real-build test (no scaffolding CLI) |
+| Unity | — | recognised only: needs the editor and a license on the runner; export the Xcode project and register it with `--app-path` |
+
+Not covered by any real build: signing, TestFlight, a physical device.
+
 ## Configuration
 
 `builder.json`:

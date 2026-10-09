@@ -35,6 +35,10 @@ type BuildOptions struct {
 	// project code is checked out, and enforced below against what the build
 	// actually produced.
 	BundleID string
+	// GodotDir is the absolute folder (outside the checkout) holding the Godot
+	// editor (Godot.app) and its export templates (templates/), installed by the
+	// workflow. Only Godot projects use it.
+	GodotDir string
 	// RunTests runs `xcodebuild test` on an iOS Simulator instead of producing
 	// an IPA. Supported for native Xcode / XcodeGen projects only.
 	RunTests bool
@@ -116,6 +120,9 @@ func (options *BuildOptions) validate() error {
 	}
 	if err := validateRelativePath(options.IOSPath); err != nil {
 		return fmt.Errorf("invalid iOS path")
+	}
+	if options.GodotDir != "" && (!filepath.IsAbs(options.GodotDir) || pathWithin(options.SourceRoot, options.GodotDir)) {
+		return fmt.Errorf("invalid Godot tools folder")
 	}
 	if options.AppPath != "" {
 		if err := validateRelativePath(options.AppPath); err != nil {
@@ -226,11 +233,33 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 		}
 		return buildTauri(run, appRoot, options)
 	}
+	if options.Framework == FrameworkMAUI {
+		if options.RunTests {
+			return fmt.Errorf("simulator tests are supported for native Xcode and XcodeGen projects only")
+		}
+		return buildMAUI(run, appRoot, options)
+	}
 	iosRoot := filepath.Join(sourceRoot, options.IOSPath)
 	switch options.Framework {
 	case FrameworkExpo:
 		// Managed Expo projects commit no ios/ directory; prebuild generates it (and runs pod install).
 		if err := run.run(appRoot, "npx", "--no-install", "expo", "prebuild", "--platform", "ios"); err != nil {
+			return err
+		}
+		if iosPath := strings.TrimSpace(options.IOSPath); iosPath == "" || iosPath == "." {
+			iosRoot = filepath.Join(appRoot, "ios")
+		}
+	case FrameworkGodot:
+		exported, err := generateGodotXcodeProject(run, appRoot, options.GodotDir, privateHome)
+		if err != nil {
+			return err
+		}
+		iosRoot = exported
+	case FrameworkSparkling:
+		// `sparkling-app-cli build --copy` compiles the Lynx bundles and copies them into
+		// the committed ios/ project; pod install and xcodebuild below build that project.
+		program, args := scriptCommand(appRoot, "build")
+		if err := run.run(appRoot, program, args...); err != nil {
 			return err
 		}
 		if iosPath := strings.TrimSpace(options.IOSPath); iosPath == "" || iosPath == "." {
@@ -411,13 +440,13 @@ func verifyBuiltBundleID(appPath, expected string) error {
 		return fmt.Errorf("read built application identity: %w", err)
 	}
 	if built != expected {
-		return fmt.Errorf("built application identity does not match the registered project")
+		return fmt.Errorf("built application identity %q does not match the registered project's %q (the log is private); fix the bundle identifier in the project or register again", built, expected)
 	}
 	return nil
 }
 
 func isNodeFramework(framework string) bool {
-	return framework == FrameworkReactNative || framework == FrameworkExpo || framework == FrameworkCordova || framework == FrameworkIonic || framework == FrameworkNativeScript
+	return framework == FrameworkReactNative || framework == FrameworkExpo || framework == FrameworkCordova || framework == FrameworkIonic || framework == FrameworkNativeScript || framework == FrameworkSparkling
 }
 
 func isCapacitorProject(root string) bool { return projectdetect.IsCapacitorProject(root) }
@@ -437,6 +466,18 @@ func makeGradleWrapperExecutable(root string) error {
 	return nil
 }
 
+// npmInstallWithFallback runs `npm <command>` and, if it fails, once more with
+// --legacy-peer-deps. Fresh scaffolds of some frameworks fail the strict resolver
+// (npm: "Cannot read properties of null (reading 'edgesOut')") yet install with it.
+func npmInstallWithFallback(run executor, root, command string) error {
+	err := run.run(root, "npm", command)
+	if err == nil {
+		return nil
+	}
+	fmt.Fprintf(run.log, "\nnpm %s failed; retrying with --legacy-peer-deps\n", command)
+	return run.run(root, "npm", command, "--legacy-peer-deps")
+}
+
 func installNodeDependencies(run executor, root string) error {
 	switch {
 	case exists(filepath.Join(root, "pnpm-lock.yaml")):
@@ -444,9 +485,9 @@ func installNodeDependencies(run executor, root string) error {
 	case exists(filepath.Join(root, "yarn.lock")):
 		return run.run(root, "corepack", "yarn", "install", "--frozen-lockfile")
 	case exists(filepath.Join(root, "package-lock.json")):
-		return run.run(root, "npm", "ci")
+		return npmInstallWithFallback(run, root, "ci")
 	default:
-		return run.run(root, "npm", "install")
+		return npmInstallWithFallback(run, root, "install")
 	}
 }
 
