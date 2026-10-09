@@ -23,6 +23,7 @@ const (
 	FrameworkIonic        = "ionic" // Ionic or plain Capacitor
 	FrameworkTauri        = "tauri" // Tauri 2 mobile
 	FrameworkNativeScript = "nativescript"
+	FrameworkSparkling    = "sparkling" // Lynx app framework with a committed ios/ project
 )
 
 // ErrUnsupportedFramework means the project is a recognised engine that this
@@ -38,6 +39,7 @@ var (
 	flutterSDKRe      = regexp.MustCompile(`(?m)^\s+sdk:\s*flutter\b`)
 	expoDepRe         = regexp.MustCompile(`"expo"\s*:`)
 	reactNativeDepRe  = regexp.MustCompile(`"react-native"\s*:`)
+	sparklingDepRe    = regexp.MustCompile(`"sparkling-app-cli"\s*:`)
 	nativeScriptDepRe = regexp.MustCompile(`"(@nativescript/core|nativescript)"\s*:`)
 	ionicDepRe        = regexp.MustCompile(`"@ionic/|"ionic"\s*:`)
 	capacitorIOSRe    = regexp.MustCompile(`"@capacitor/ios"`)
@@ -86,6 +88,8 @@ func DetectFramework(appRoot string) (string, error) {
 	}
 	pkg, _ := os.ReadFile(filepath.Join(appRoot, "package.json"))
 	switch {
+	case sparklingDepRe.Match(pkg):
+		return FrameworkSparkling, nil
 	case nativeScriptDepRe.Match(pkg) || HasNativeScriptConfig(appRoot):
 		return FrameworkNativeScript, nil
 	case expoDepRe.Match(pkg):
