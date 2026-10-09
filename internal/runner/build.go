@@ -158,6 +158,21 @@ func (e executor) run(dir, program string, args ...string) error {
 	return nil
 }
 
+// runCollect is run that also returns the combined output, even on failure.
+func (e executor) runCollect(dir, program string, args ...string) ([]byte, error) {
+	fmt.Fprintf(e.log, "\n$ %s %s\n", program, strings.Join(args, " "))
+	cmd := exec.CommandContext(e.ctx, program, args...)
+	cmd.Dir = dir
+	cmd.Env = e.env
+	var output bytes.Buffer
+	cmd.Stdout = io.MultiWriter(e.log, &output)
+	cmd.Stderr = io.MultiWriter(e.log, &output)
+	if err := cmd.Run(); err != nil {
+		return output.Bytes(), fmt.Errorf("%s failed: %w", filepath.Base(program), err)
+	}
+	return output.Bytes(), nil
+}
+
 func (e executor) capture(dir, program string, args ...string) ([]byte, error) {
 	fmt.Fprintf(e.log, "\n$ %s %s\n", program, strings.Join(args, " "))
 	cmd := exec.CommandContext(e.ctx, program, args...)
@@ -218,7 +233,17 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 	case FrameworkIonic:
 		if isCapacitorProject(appRoot) {
 			// The web assets (webDir) are build output, not committed; cap sync copies them.
-			if err := run.run(appRoot, "npm", "run", "build", "--if-present"); err != nil {
+			plan, err := planWebBuild(appRoot)
+			if err != nil {
+				return err
+			}
+			if plan.Script != "" {
+				program, args := scriptCommand(appRoot, plan.Script)
+				if err := run.run(appRoot, program, args...); err != nil {
+					return err
+				}
+			}
+			if err := plan.verifyWebAssets(appRoot); err != nil {
 				return err
 			}
 			if err := run.run(appRoot, "npx", "--no-install", "cap", "sync", "ios"); err != nil {
@@ -246,7 +271,11 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 	var appPath string
 	if options.Framework == FrameworkFlutter {
 		flutterRoot := appRoot
-		if err := run.run(flutterRoot, "flutter", "pub", "get"); err != nil {
+		if output, err := run.runCollect(flutterRoot, "flutter", "pub", "get"); err != nil {
+			lock, _ := os.ReadFile(filepath.Join(flutterRoot, "pubspec.lock"))
+			if explanation := explainPubGetFailure(string(output), string(lock)); explanation != "" {
+				return fmt.Errorf("%s: %w", explanation, err)
+			}
 			return err
 		}
 		mode := "--release"

@@ -106,6 +106,8 @@ func TestCentralWorkflowSecurityProperties(t *testing.T) {
 		"skip-token-revoke: true", "permission-contents: read",
 		"if: always() && steps.source-token.outcome == 'success'",
 		"Restore bounded large-file snapshot chunks", "restore-snapshot --source",
+		"builder-runner\" tool-versions", "node-version: ${{ steps.tools.outputs.node_version || '20' }}",
+		"flutter-version: ${{ steps.tools.outputs.flutter_version }}", "DEVELOPER_DIR=$app/Contents/Developer",
 		"CODE_SIGNING_ALLOWED: 'NO'", "retention-days: 1",
 		"name: ios-builder-${{ inputs.build_id }}", "encrypted/build.log.age", "encrypted/App.ipa.age", "encrypted/project-output.age",
 		"go mod verify",

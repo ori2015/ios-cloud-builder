@@ -33,6 +33,8 @@ func run(args []string) error {
 		return revokeToken()
 	case "detect":
 		return detect(args[1:])
+	case "tool-versions":
+		return toolVersions(args[1:])
 	case "verify-checkout":
 		return verifyCheckout(args[1:])
 	case "restore-snapshot":
@@ -292,6 +294,24 @@ func detect(args []string) error {
 		return fmt.Errorf("framework detection failed")
 	}
 	fmt.Printf("framework=%s\n", framework)
+	return nil
+}
+
+// toolVersions prints the toolchain versions the project pins, as workflow
+// outputs. Only validated version numbers are ever printed.
+func toolVersions(args []string) error {
+	flags := newFlags("tool-versions")
+	var source, appPath string
+	flags.StringVar(&source, "source", "", "")
+	flags.StringVar(&appPath, "app-path", "", "")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || !filepath.IsAbs(source) {
+		return fmt.Errorf("invalid tool version arguments")
+	}
+	versions, err := runner.ToolVersionsAt(source, appPath)
+	if err != nil {
+		return fmt.Errorf("tool version detection failed")
+	}
+	fmt.Printf("flutter_version=%s\nnode_version=%s\nxcode_version=%s\n", versions.Flutter, versions.Node, versions.Xcode)
 	return nil
 }
 

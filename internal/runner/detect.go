@@ -14,6 +14,9 @@ func DetectFrameworkAt(sourceRoot, appPath, hint string) (string, error) {
 		if err := validateRelativePath(appPath); err != nil {
 			return "", os.ErrInvalid
 		}
+		if real, err := filepath.EvalSymlinks(sourceRoot); err == nil {
+			sourceRoot = real
+		}
 		resolved, err := filepath.EvalSymlinks(filepath.Join(sourceRoot, filepath.FromSlash(appPath)))
 		if err != nil || !pathWithin(sourceRoot, resolved) {
 			return "", os.ErrNotExist
