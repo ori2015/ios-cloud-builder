@@ -123,11 +123,39 @@ jobs:
             --app-path "$APP_PATH" \
             --framework "$FRAMEWORK_HINT" >> "$GITHUB_OUTPUT"
 
+      - name: Read tool versions pinned by the project
+        id: tools
+        env:
+          APP_PATH: ${{ steps.project.outputs.app_path }}
+        run: |
+          # Only validated version numbers are emitted; the files read are plain
+          # version pins (.flutter-version, .fvmrc, .nvmrc, .node-version, .xcode-version).
+          "$RUNNER_TEMP/builder-runner" tool-versions \
+            --source "$GITHUB_WORKSPACE/source" \
+            --app-path "$APP_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Select the project's Xcode version
+        if: steps.tools.outputs.xcode_version != ''
+        env:
+          XCODE_VERSION: ${{ steps.tools.outputs.xcode_version }}
+        run: |
+          app=""
+          for candidate in "/Applications/Xcode_${XCODE_VERSION}.app" "/Applications/Xcode_${XCODE_VERSION}"*.app; do
+            if [ -d "$candidate" ]; then app="$candidate"; fi
+          done
+          if [ -z "$app" ]; then
+            installed=""
+            for candidate in /Applications/Xcode_*.app; do installed="$installed ${candidate#/Applications/}"; done
+            echo "::error::The project pins Xcode ${XCODE_VERSION} (.xcode-version) but this runner has:${installed}. Change .xcode-version to one of these."
+            exit 1
+          fi
+          echo "DEVELOPER_DIR=$app/Contents/Developer" >> "$GITHUB_ENV"
+
       - name: Set up Node.js
         if: steps.detect.outputs.framework == 'react-native' || steps.detect.outputs.framework == 'expo' || steps.detect.outputs.framework == 'cordova' || steps.detect.outputs.framework == 'ionic'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
-          node-version: '20'
+          node-version: ${{ steps.tools.outputs.node_version || '20' }}
 
       - name: Set up Java for Kotlin Multiplatform
         if: steps.detect.outputs.framework == 'kmp'
@@ -136,25 +164,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Read the project's Flutter version pin
-        id: flutter-pin
-        if: steps.detect.outputs.framework == 'flutter'
-        run: |
-          # Optional `.flutter-version` at the repository root (a plain x.y.z). Anything else is ignored and
-          # the latest stable Flutter is used, as before. The value is a public version number, not a secret.
-          version=""
-          if [ -f "$GITHUB_WORKSPACE/source/.flutter-version" ]; then
-            candidate="$(head -n 1 "$GITHUB_WORKSPACE/source/.flutter-version" | tr -d '[:space:]')"
-            if printf '%s' "$candidate" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then version="$candidate"; fi
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
       - name: Set up Flutter
         if: steps.detect.outputs.framework == 'flutter'
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with:
           channel: stable
-          flutter-version: ${{ steps.flutter-pin.outputs.version }}
+          flutter-version: ${{ steps.tools.outputs.flutter_version }}
           cache: false
 
       - name: Build unsigned IPA and encrypt private outputs
