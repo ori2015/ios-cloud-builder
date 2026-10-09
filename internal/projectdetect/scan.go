@@ -45,7 +45,6 @@ var skipDirs = map[string]bool{
 var skipSuffixes = []string{".xcodeproj", ".xcworkspace", ".app", ".framework", ".xcframework", ".xcassets", ".bundle", ".lproj", ".playground"}
 
 var (
-	flutterPubspecRe = regexp.MustCompile(`(?m)^flutter:`)
 	nodeMarkerRe     = regexp.MustCompile(`"(expo|react-native|cordova|ionic)"|"@(capacitor|ionic)/`)
 	xcodegenTargetRe = regexp.MustCompile(`(?m)^targets:`)
 )
@@ -103,7 +102,7 @@ func hasSkipSuffix(name string) bool {
 // generates or wraps the Xcode project over the bare Xcode project itself.
 func classify(dir string) (Kind, bool) {
 	if pubspec, err := os.ReadFile(filepath.Join(dir, "pubspec.yaml")); err == nil &&
-		flutterPubspecRe.Match(pubspec) && hasIOSContainerBelow(dir, "ios") {
+		IsFlutterPubspec(pubspec) && hasIOSContainerBelow(dir, "ios") {
 		return KindFlutter, true
 	}
 	if pkg, err := os.ReadFile(filepath.Join(dir, "package.json")); err == nil && nodeMarkerRe.Match(pkg) {
@@ -126,7 +125,7 @@ func classify(dir string) (Kind, bool) {
 
 func isCordovaConfig(dir string) bool {
 	data, err := os.ReadFile(filepath.Join(dir, "config.xml"))
-	return err == nil && strings.Contains(string(data), "<widget") && strings.Contains(string(data), "cordova")
+	return err == nil && strings.Contains(string(data), "<widget")
 }
 
 func hasGradleSettings(dir string) bool {

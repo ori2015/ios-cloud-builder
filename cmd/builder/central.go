@@ -55,7 +55,7 @@ func init() {
 	centralSetupCmd.Flags().String("project-id", "", "Existing opaque project ID (normally generated automatically)")
 	centralSetupCmd.Flags().String("snapshot-namespace", "", "Existing private snapshot namespace (normally generated automatically)")
 	centralRegisterCmd.Flags().String("registry-file", "", "Mode-0600 local registry backup path")
-	centralRegisterCmd.Flags().String("bundle-id", "", "Application identity this project may be signed as (required for --testflight and --adhoc)")
+	centralRegisterCmd.Flags().String("bundle-id", "", "Application identity this project may be signed as (default: read from the project)")
 	centralDoctorCmd.Flags().StringP("remote", "r", "origin", "Private source git remote")
 	centralDoctorCmd.Flags().Bool("testflight", false, "Also verify apple-production metadata without reading secret values")
 	centralDoctorCmd.Flags().Bool("adhoc", false, "Also verify apple-production metadata for ad hoc signing, without reading secret values")
@@ -183,10 +183,24 @@ func runCentralRegister(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	rawBundleID, _ := cmd.Flags().GetString("bundle-id")
-	bundleID := strings.TrimSpace(rawBundleID)
-	if bundleID != "" && !registry.BundleIDPattern.MatchString(bundleID) {
+	bundleFlag := strings.TrimSpace(rawBundleID)
+	if bundleFlag != "" && !registry.BundleIDPattern.MatchString(bundleFlag) {
 		return errors.New("invalid --bundle-id")
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	facts, err := readProjectFacts(cwd, cfg, bundleFlag)
+	if err != nil {
+		return err
+	}
+	if note := describeNotes(facts.Notes); note != "" {
+		fmt.Println(note)
+	}
+	cfg.IOS.AppPath = facts.AppPath
+	cfg.IOS.Path = facts.IOSPath
+	bundleID := facts.BundleID
 	registryPath, _ := cmd.Flags().GetString("registry-file")
 	if registryPath == "" {
 		registryPath, err = defaultRegistryPath(cfg.Builder.Owner, cfg.Builder.Repo)
@@ -198,7 +212,7 @@ func runCentralRegister(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("load local registry backup: %w", err)
 	}
-	iosPath := cfg.IOS.Path
+	iosPath := facts.IOSPath
 	if iosPath == "" {
 		iosPath = "."
 	}
@@ -221,8 +235,8 @@ func runCentralRegister(cmd *cobra.Command, _ []string) error {
 	}
 	cfg.GitHub.Owner, cfg.GitHub.Repo = canonical[0], canonical[1]
 	project := registry.Project{
-		Owner: cfg.GitHub.Owner, Repo: cfg.GitHub.Repo, BundleID: bundleID, AppPath: cfg.IOS.AppPath, IOSPath: iosPath,
-		Scheme: cfg.IOS.Scheme, Configuration: configuration, FrameworkHint: centralFrameworkHint(cfg),
+		Owner: cfg.GitHub.Owner, Repo: cfg.GitHub.Repo, BundleID: bundleID, AppPath: facts.AppPath, IOSPath: iosPath,
+		Scheme: cfg.IOS.Scheme, Configuration: configuration, FrameworkHint: facts.Framework,
 		SnapshotNamespace: cfg.SnapshotNamespace,
 	}
 	if err := value.Put(cfg.ProjectID, &project); err != nil {
@@ -262,19 +276,6 @@ func defaultRegistryPath(owner, repo string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(root, "ios-builder", "registries", owner+"-"+repo+".json"), nil
-}
-
-func centralFrameworkHint(cfg *config.Config) string {
-	switch {
-	case cfg.ReactNative.Expo:
-		return "expo"
-	case cfg.Flutter.Version != "":
-		return "flutter"
-	case cfg.KMP.JDKVersion != "":
-		return "kmp"
-	default:
-		return "auto"
-	}
 }
 
 func printGitHubAppSetup(owner, repo string) {

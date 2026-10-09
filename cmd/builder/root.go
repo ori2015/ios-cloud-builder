@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -20,6 +19,7 @@ import (
 	"github.com/MobAI-App/ios-builder/internal/build"
 	"github.com/MobAI-App/ios-builder/internal/config"
 	"github.com/MobAI-App/ios-builder/internal/github"
+	"github.com/MobAI-App/ios-builder/internal/projectdetect"
 	"github.com/MobAI-App/ios-builder/internal/security"
 	"github.com/MobAI-App/ios-builder/internal/update"
 	"github.com/MobAI-App/ios-builder/internal/workflow"
@@ -127,7 +127,7 @@ func isExpoProject() bool {
 // in the Kotlin DSL (`kotlin("multiplatform")`) or Groovy/plugin-id form. It
 // must stay in step with the detection in the workflow template: a project the
 // CLI calls KMP but the runner does not gets no JDK, and vice versa.
-var kmpPluginRe = regexp.MustCompile(`kotlin\("multiplatform"\)|org\.jetbrains\.kotlin\.multiplatform|id\(["']org\.jetbrains\.kotlin\.multiplatform["']\)`)
+var kmpPluginRe = projectdetect.KMPPluginRe
 
 // isKMPProject reports whether the current directory looks like a Kotlin
 // Multiplatform project. The multiplatform plugin usually lives in a module's

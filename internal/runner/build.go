@@ -366,14 +366,7 @@ func isNodeFramework(framework string) bool {
 	return framework == FrameworkReactNative || framework == FrameworkExpo || framework == FrameworkCordova || framework == FrameworkIonic
 }
 
-func isCapacitorProject(root string) bool {
-	for _, name := range []string{"capacitor.config.ts", "capacitor.config.js", "capacitor.config.json"} {
-		if exists(filepath.Join(root, name)) {
-			return true
-		}
-	}
-	return false
-}
+func isCapacitorProject(root string) bool { return projectdetect.IsCapacitorProject(root) }
 
 func makeGradleWrapperExecutable(root string) error {
 	path := filepath.Join(root, "gradlew")
