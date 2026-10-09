@@ -12,7 +12,7 @@ func iCloudTemplateProfile() map[string]any {
 		iCloudEnvironmentKey:     []any{"Production", "Development"},
 		iCloudDevContainersKey:   []any{"iCloud.com.example.app"},
 		iCloudKVStoreKey:         "TEAM1234.*",
-		"com.apple.developer.icloud-container-identifiers": []any{"iCloud.com.example.app"},
+		iCloudContainersKey:      []any{"iCloud.com.example.app"},
 	}
 }
 
@@ -45,8 +45,17 @@ func TestNarrowICloudEntitlementsNeverWidens(t *testing.T) {
 	}
 }
 
-func TestNarrowICloudEntitlementsWithoutRequestDropsWildcard(t *testing.T) {
+func TestNarrowICloudEntitlementsWithoutRequestUsesCloudKitForContainers(t *testing.T) {
 	got := narrowICloudEntitlements(iCloudTemplateProfile(), nil, "TEAM1234", "com.example.app")
+	if !reflect.DeepEqual(got[iCloudServicesKey], []string{"CloudKit"}) {
+		t.Fatalf("services = %v", got[iCloudServicesKey])
+	}
+}
+
+func TestNarrowICloudEntitlementsWithoutRequestOrContainerDropsWildcard(t *testing.T) {
+	profile := iCloudTemplateProfile()
+	delete(profile, iCloudContainersKey)
+	got := narrowICloudEntitlements(profile, nil, "TEAM1234", "com.example.app")
 	if _, present := got[iCloudServicesKey]; present {
 		t.Fatal("a wildcard services value is never valid in a signature")
 	}

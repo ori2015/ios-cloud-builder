@@ -97,6 +97,9 @@ func (s *planSigner) signPlan(ctx context.Context, plan *signingPlan) error {
 			entitlements = distributionEntitlements(entitlements, s.teamID)
 		}
 		entitlements = narrowICloudEntitlements(entitlements, services, s.teamID, step.BundleID)
+		if _, hasICloud := entitlements[iCloudContainersKey]; hasICloud {
+			_, _ = fmt.Fprintln(s.log, describeICloudEntitlements(step.BundleID, len(services), entitlements))
+		}
 		entitlementsPath := filepath.Join(s.secretsDir, fmt.Sprintf("entitlements-%03d.plist", index))
 		if err := writeSigningEntitlements(entitlementsPath, entitlements, domains); err != nil {
 			return fmt.Errorf("prepare signing entitlements")

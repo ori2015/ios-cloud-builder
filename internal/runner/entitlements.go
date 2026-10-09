@@ -297,6 +297,7 @@ const (
 	iCloudEnvironmentKey     = "com.apple.developer.icloud-container-environment"
 	iCloudDevContainersKey   = "com.apple.developer.icloud-container-development-container-identifiers"
 	iCloudKVStoreKey         = "com.apple.developer.ubiquity-kvstore-identifier"
+	iCloudContainersKey      = "com.apple.developer.icloud-container-identifiers"
 	maxICloudServiceRequests = 8
 )
 
@@ -373,6 +374,11 @@ func narrowICloudEntitlements(profile map[string]any, requestedServices []string
 		switch {
 		case len(narrowed) > 0:
 			out[iCloudServicesKey] = narrowed
+		case allowAll && len(stringList(out[iCloudContainersKey])) > 0:
+			// No request was recorded, but the profile names an iCloud container: CloudKit is the
+			// service a container identifier is for. Without any service the app traps at launch
+			// when CloudKit checks its entitlements.
+			out[iCloudServicesKey] = []string{"CloudKit"}
 		case allowAll:
 			delete(out, iCloudServicesKey)
 		}
@@ -400,4 +406,13 @@ func stringList(value any) []string {
 		return out
 	}
 	return nil
+}
+
+// describeICloudEntitlements is a log line about the iCloud entitlements that
+// will be signed. It names keys and the public service and environment values
+// only, never container or team identifiers.
+func describeICloudEntitlements(bundleID string, requested int, signed map[string]any) string {
+	services := stringList(signed[iCloudServicesKey])
+	return fmt.Sprintf("iCloud entitlements for %s: requested %d service(s); signing services=%v environment=%v containers=%d development containers=%t",
+		bundleID, requested, services, signed[iCloudEnvironmentKey], len(stringList(signed[iCloudContainersKey])), signed[iCloudDevContainersKey] != nil)
 }
