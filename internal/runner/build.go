@@ -12,13 +12,19 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/MobAI-App/ios-builder/internal/projectdetect"
 )
 
 var ErrBuildFailed = errors.New("private iOS build failed; download the encrypted diagnostic log")
 
 type BuildOptions struct {
-	SourceRoot    string
-	IOSPath       string
+	SourceRoot string
+	IOSPath    string
+	// AppPath is the repository-relative folder holding the app's pubspec.yaml,
+	// package.json or Xcode project. Empty keeps the older rule of using the
+	// parent of IOSPath when that holds a manifest, else the checkout root.
+	AppPath       string
 	Scheme        string
 	Configuration string
 	Framework     string
@@ -111,6 +117,11 @@ func (options *BuildOptions) validate() error {
 	if err := validateRelativePath(options.IOSPath); err != nil {
 		return fmt.Errorf("invalid iOS path")
 	}
+	if options.AppPath != "" {
+		if err := validateRelativePath(options.AppPath); err != nil {
+			return fmt.Errorf("invalid app path")
+		}
+	}
 	if options.Scheme != "" && !schemePattern.MatchString(options.Scheme) {
 		return fmt.Errorf("invalid scheme")
 	}
@@ -180,7 +191,10 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 	env := ChildEnvironment(sourceRoot, privateHome)
 	run := executor{ctx: ctx, env: env, log: privateLog}
 
-	appRoot := nodeProjectRoot(sourceRoot, options.IOSPath)
+	appRoot, err := resolveAppRoot(sourceRoot, options)
+	if err != nil {
+		return err
+	}
 	if isNodeFramework(options.Framework) {
 		if err := installNodeDependencies(run, appRoot); err != nil {
 			return err
@@ -197,28 +211,28 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 			iosRoot = filepath.Join(appRoot, "ios")
 		}
 	case FrameworkCordova:
-		if err := run.run(sourceRoot, "npx", "--no-install", "cordova", "prepare", "ios"); err != nil {
+		if err := run.run(appRoot, "npx", "--no-install", "cordova", "prepare", "ios"); err != nil {
 			return err
 		}
-		iosRoot = filepath.Join(sourceRoot, "platforms", "ios")
+		iosRoot = filepath.Join(appRoot, "platforms", "ios")
 	case FrameworkIonic:
-		if isCapacitorProject(sourceRoot) {
+		if isCapacitorProject(appRoot) {
 			// The web assets (webDir) are build output, not committed; cap sync copies them.
-			if err := run.run(sourceRoot, "npm", "run", "build", "--if-present"); err != nil {
+			if err := run.run(appRoot, "npm", "run", "build", "--if-present"); err != nil {
 				return err
 			}
-			if err := run.run(sourceRoot, "npx", "--no-install", "cap", "sync", "ios"); err != nil {
+			if err := run.run(appRoot, "npx", "--no-install", "cap", "sync", "ios"); err != nil {
 				return err
 			}
 			// Keep the registered iOS path (Capacitor 3+ projects live in ios/App).
 			if iosPath := strings.TrimSpace(options.IOSPath); iosPath == "" || iosPath == "." {
-				iosRoot = filepath.Join(sourceRoot, "ios")
+				iosRoot = filepath.Join(appRoot, "ios")
 			}
 		} else {
-			if err := run.run(sourceRoot, "npx", "--no-install", "ionic", "cordova", "prepare", "ios"); err != nil {
+			if err := run.run(appRoot, "npx", "--no-install", "ionic", "cordova", "prepare", "ios"); err != nil {
 				return err
 			}
-			iosRoot = filepath.Join(sourceRoot, "platforms", "ios")
+			iosRoot = filepath.Join(appRoot, "platforms", "ios")
 		}
 	}
 	iosRoot, err = filepath.EvalSymlinks(iosRoot)
@@ -231,7 +245,7 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 	}
 	var appPath string
 	if options.Framework == FrameworkFlutter {
-		flutterRoot := flutterProjectRoot(sourceRoot, iosRoot)
+		flutterRoot := appRoot
 		if err := run.run(flutterRoot, "flutter", "pub", "get"); err != nil {
 			return err
 		}
@@ -245,7 +259,7 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 		appPath, err = findApp(filepath.Join(flutterRoot, "build", "ios", "iphoneos"))
 	} else {
 		if options.Framework == FrameworkKMP {
-			if err := makeGradleWrapperExecutable(sourceRoot); err != nil {
+			if err := makeGradleWrapperExecutable(appRoot); err != nil {
 				return err
 			}
 		}
@@ -389,6 +403,28 @@ func installNodeDependencies(run executor, root string) error {
 	}
 }
 
+// resolveAppRoot returns the directory the framework tooling runs in. An
+// explicit AppPath (resolved from the project by the CLI) wins; without one the
+// older rule applies: the parent of the iOS directory when it holds the
+// framework's manifest, else the checkout root.
+func resolveAppRoot(sourceRoot string, options *BuildOptions) (string, error) {
+	if options.AppPath != "" {
+		root, err := filepath.EvalSymlinks(filepath.Join(sourceRoot, filepath.FromSlash(options.AppPath)))
+		if err != nil || !pathWithin(sourceRoot, root) {
+			return "", fmt.Errorf("app path is missing from the checkout; run `builder central register` again after fixing ios.appPath in builder.json")
+		}
+		return root, nil
+	}
+	switch options.Framework {
+	case FrameworkFlutter:
+		return flutterProjectRoot(sourceRoot, filepath.Join(sourceRoot, options.IOSPath)), nil
+	case FrameworkNative, FrameworkKMP:
+		return sourceRoot, nil
+	default:
+		return nodeProjectRoot(sourceRoot, options.IOSPath), nil
+	}
+}
+
 // flutterProjectRoot returns the directory that holds the Flutter app's
 // pubspec.yaml: the parent of the iOS directory when it has one (a monorepo
 // keeps the app in a subdirectory such as app/ios), otherwise the checkout root.
@@ -416,8 +452,12 @@ func findXcodeContainer(iosRoot string) (workspace, project string, err error) {
 	projects, _ := filepath.Glob(filepath.Join(iosRoot, "*.xcodeproj"))
 	sort.Strings(workspaces)
 	sort.Strings(projects)
-	if len(workspaces) > 0 {
-		return filepath.Base(workspaces[0]), "", nil
+	// An empty or dangling workspace stub (one that names an .xcodeproj which is
+	// not committed) is not a container; XcodeGen can still produce the project.
+	for _, workspace := range workspaces {
+		if projectdetect.UsableWorkspace(workspace) {
+			return filepath.Base(workspace), "", nil
+		}
 	}
 	if len(projects) > 0 {
 		return "", filepath.Base(projects[0]), nil
@@ -487,19 +527,45 @@ func detectScheme(run executor, iosRoot, workspace, project string) (string, err
 	schemes := listing.Project.Schemes
 	if workspace != "" {
 		schemes = listing.Workspace.Schemes
-	}
-	preferred := strings.TrimSuffix(strings.TrimSuffix(containerName, ".xcworkspace"), ".xcodeproj")
-	for _, scheme := range schemes {
-		if scheme == preferred {
-			return scheme, nil
+		// A workspace lists every CocoaPods target as a scheme too. When the app's
+		// own project sits beside it, only that project's schemes are candidates.
+		if own := appProjectSchemes(run, iosRoot, workspace); len(own) > 0 {
+			schemes = own
 		}
 	}
-	for _, scheme := range schemes {
-		if scheme != "" && !strings.HasPrefix(scheme, "Pods-") {
-			return scheme, nil
-		}
+	scheme, err := projectdetect.PickScheme(schemes, strings.TrimSuffix(strings.TrimSuffix(containerName, ".xcworkspace"), ".xcodeproj"))
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", containerName, err)
 	}
-	return "", fmt.Errorf("no shared application scheme found")
+	return scheme, nil
+}
+
+// appProjectSchemes lists the schemes of the app's own .xcodeproj next to a
+// workspace, ignoring the generated Pods project. It returns nil when there is
+// no such project or it cannot be listed.
+func appProjectSchemes(run executor, iosRoot, workspace string) []string {
+	base := strings.TrimSuffix(workspace, ".xcworkspace")
+	projects, _ := filepath.Glob(filepath.Join(iosRoot, "*.xcodeproj"))
+	sort.Strings(projects)
+	for _, project := range projects {
+		name := filepath.Base(project)
+		if name == "Pods.xcodeproj" {
+			continue
+		}
+		if strings.TrimSuffix(name, ".xcodeproj") != base && len(projects) > 1 {
+			continue
+		}
+		output, err := run.capture(iosRoot, "xcodebuild", "-project", name, "-list", "-json")
+		if err != nil {
+			return nil
+		}
+		var listing xcodeList
+		if json.Unmarshal(output, &listing) != nil {
+			return nil
+		}
+		return listing.Project.Schemes
+	}
+	return nil
 }
 
 func findApp(root string) (string, error) {

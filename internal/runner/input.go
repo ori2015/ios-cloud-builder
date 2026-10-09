@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -113,10 +114,10 @@ func ResolveProject(in *Inputs, registryJSON, outputPath string, commands io.Wri
 	}
 	values := map[string]string{
 		"source_owner": project.Owner, "source_repo": project.Repo, "snapshot_ref": snapshotRef,
-		"ios_path": project.IOSPath, "scheme": project.Scheme, "configuration": configuration,
+		"app_path": project.AppPath, "ios_path": project.IOSPath, "scheme": project.Scheme, "configuration": configuration,
 		"framework_hint": project.FrameworkHint, "bundle_id": project.BundleID,
 	}
-	for _, name := range []string{"source_owner", "source_repo", "snapshot_ref", "ios_path", "scheme", "configuration", "framework_hint", "bundle_id"} {
+	for _, name := range []string{"source_owner", "source_repo", "snapshot_ref", "app_path", "ios_path", "scheme", "configuration", "framework_hint", "bundle_id"} {
 		if _, err := fmt.Fprintf(output, "%s=%s\n", name, values[name]); err != nil {
 			return fmt.Errorf("write trusted project outputs")
 		}
@@ -125,10 +126,11 @@ func ResolveProject(in *Inputs, registryJSON, outputPath string, commands io.Wri
 }
 
 func validateRelativePath(value string) error {
-	if value == "" || filepath.IsAbs(value) || strings.ContainsAny(value, "\x00\r\n") || strings.Contains(value, `\`) {
+	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "/") || strings.ContainsAny(value, "\x00\r\n") || strings.Contains(value, `\`) {
 		return fmt.Errorf("must be a non-empty portable relative path")
 	}
-	clean := filepath.Clean(value)
+	// Registry paths are slash-separated on every platform.
+	clean := path.Clean(value)
 	if clean != value || clean == ".." || strings.HasPrefix(clean, "../") {
 		return fmt.Errorf("must be clean and remain inside the checkout")
 	}

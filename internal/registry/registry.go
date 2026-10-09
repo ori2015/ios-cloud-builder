@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -50,7 +51,11 @@ type Project struct {
 	// otherwise comes from the built application, which is project-controlled,
 	// and would let one project be signed with another's identity and inherit
 	// its entitlements.
-	BundleID          string `json:"bundle_id,omitempty"`
+	BundleID string `json:"bundle_id,omitempty"`
+	// AppPath is the repository-relative folder holding the app's manifest
+	// (pubspec.yaml, package.json, Xcode project). Empty means the older rule:
+	// derive it from IOSPath at build time.
+	AppPath           string `json:"app_path,omitempty"`
 	IOSPath           string `json:"ios_path,omitempty"`
 	Scheme            string `json:"scheme,omitempty"`
 	Configuration     string `json:"configuration"`
@@ -123,12 +128,11 @@ func (p *Project) Validate() error {
 	if !repoPattern.MatchString(p.Repo) || p.Repo == "." || p.Repo == ".." || strings.HasSuffix(strings.ToLower(p.Repo), ".git") {
 		return errors.New("invalid repository")
 	}
-	iosPath := p.IOSPath
-	if iosPath == "" {
-		iosPath = "."
-	}
-	if filepath.IsAbs(iosPath) || filepath.Clean(iosPath) != iosPath || iosPath == ".." || strings.HasPrefix(iosPath, "../") || strings.ContainsAny(iosPath, `\`+"\r\n\x00") {
+	if !validRelativePath(p.IOSPath) {
 		return errors.New("invalid iOS path")
+	}
+	if !validRelativePath(p.AppPath) {
+		return errors.New("invalid app path")
 	}
 	if !schemePattern.MatchString(p.Scheme) {
 		return errors.New("invalid scheme")
@@ -148,6 +152,19 @@ func (p *Project) Validate() error {
 		return errors.New("invalid snapshot namespace")
 	}
 	return nil
+}
+
+// validRelativePath accepts an empty value (meaning ".") or a clean path that
+// stays inside the checkout.
+func validRelativePath(value string) bool {
+	if value == "" {
+		value = "."
+	}
+	// Registry paths are always slash-separated, whatever platform parses them.
+	if filepath.IsAbs(value) || strings.HasPrefix(value, "/") || strings.ContainsAny(value, `\`+"\r\n\x00") {
+		return false
+	}
+	return path.Clean(value) == value && value != ".." && !strings.HasPrefix(value, "../")
 }
 
 func (r *Registry) Resolve(id string) (Project, error) {
@@ -211,7 +228,7 @@ func MaskValues(project *Project, snapshotRef string) []string {
 	for _, value := range repositoryValues {
 		values = append(values, strings.ToLower(value))
 	}
-	values = append(values, project.SnapshotNamespace, snapshotRef, project.IOSPath, project.Scheme, project.BundleID)
+	values = append(values, project.SnapshotNamespace, snapshotRef, project.AppPath, project.IOSPath, project.Scheme, project.BundleID)
 	seen := make(map[string]bool)
 	filtered := values[:0]
 	for _, value := range values {
