@@ -78,9 +78,13 @@ func TestGodotExportsThenBuildsTheXcodeProject(t *testing.T) {
 	}
 	_ = BuildUnsigned(t.Context(), options) // packaging needs macOS ditto
 	got := strings.Join(readCalls(t, calls), "\n")
+	real, err := filepath.EvalSymlinks(root) // the pipeline works on the resolved path (macOS temp dirs sit behind /var)
+	if err != nil {
+		t.Fatal(err)
+	}
 	order := []string{
-		"--headless --path " + root + " --import",
-		`--export-release iOS ` + filepath.Join(root, godotExportDir, "App.xcodeproj"),
+		"--headless --path " + real + " --import",
+		`--export-release iOS ` + filepath.Join(real, godotExportDir, "App.xcodeproj"),
 		"xcodebuild -project App.xcodeproj -list -json",
 		"-scheme App -configuration Debug -destination generic/platform=iOS",
 	}
