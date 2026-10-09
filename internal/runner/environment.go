@@ -16,6 +16,7 @@ func ChildEnvironment(sourceRoot, privateHome string) []string {
 		"JAVA_HOME": true, "FLUTTER_ROOT": true, "PUB_CACHE": true,
 		"GEM_HOME": true, "GEM_PATH": true, "COCOAPODS_HOME": true,
 		"NODE_PATH": true, "NVM_DIR": true,
+		"CARGO_HOME": true, "RUSTUP_HOME": true,
 	}
 	env := make([]string, 0, len(allowed)+8)
 	for _, entry := range os.Environ() {

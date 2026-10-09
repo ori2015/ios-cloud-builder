@@ -26,6 +26,7 @@ const (
 	FrameworkKMP         = projectdetect.FrameworkKMP
 	FrameworkCordova     = projectdetect.FrameworkCordova
 	FrameworkIonic       = projectdetect.FrameworkIonic
+	FrameworkTauri       = projectdetect.FrameworkTauri
 )
 
 // Operations accepted from workflow_dispatch. Only OperationBuild leaves the
@@ -141,7 +142,7 @@ func validateRelativePath(value string) error {
 func validFramework(framework string) bool {
 	switch framework {
 	case FrameworkAuto, FrameworkNative, FrameworkFlutter, FrameworkReactNative,
-		FrameworkExpo, FrameworkKMP, FrameworkCordova, FrameworkIonic:
+		FrameworkExpo, FrameworkKMP, FrameworkCordova, FrameworkIonic, FrameworkTauri:
 		return true
 	default:
 		return false

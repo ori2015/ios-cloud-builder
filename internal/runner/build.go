@@ -215,6 +215,17 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 			return err
 		}
 	}
+	if options.Framework == FrameworkTauri {
+		if options.RunTests {
+			return fmt.Errorf("simulator tests are supported for native Xcode and XcodeGen projects only")
+		}
+		if exists(filepath.Join(appRoot, "package.json")) {
+			if err := installNodeDependencies(run, appRoot); err != nil {
+				return err
+			}
+		}
+		return buildTauri(run, appRoot, options)
+	}
 	iosRoot := filepath.Join(sourceRoot, options.IOSPath)
 	switch options.Framework {
 	case FrameworkExpo:

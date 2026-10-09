@@ -104,6 +104,11 @@ expect_error capacitor-no-ios "cap add ios"
 put cordova config.xml '<widget id="example.generic.cordova" xmlns="http://www.w3.org/ns/widgets"></widget>'
 expect cordova "ios_path=platforms/ios framework=cordova"
 
+# --- Tauri 2
+put tauri package.json '{"devDependencies":{"@tauri-apps/cli":"^2.0.0"}}'
+put tauri src-tauri/tauri.conf.json '{"identifier":"example.generic.tauri"}'
+expect tauri "app_path= ios_path=src-tauri/gen/apple framework=tauri bundle_id=example.generic.tauri"
+
 # --- Kotlin Multiplatform
 put kmp settings.gradle.kts 'rootProject.name = "generic"'
 put kmp shared/build.gradle.kts 'plugins { kotlin("multiplatform") }'

@@ -227,3 +227,38 @@ func TestPickScheme(t *testing.T) {
 		})
 	}
 }
+
+func TestTauriLayoutAndDetection(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "package.json", `{"devDependencies":{"@tauri-apps/cli":"^2"}}`)
+	write(t, root, "src-tauri/tauri.conf.json", `{"identifier":"example.generic.tauri"}`)
+	got := resolve(t, root, "")
+	if got.Kind != KindTauri || got.IOSPath != "src-tauri/gen/apple" || !got.Generated || got.AppPath != "." {
+		t.Fatalf("uninitialised Tauri app: %+v", *got)
+	}
+	if fw, err := DetectFramework(root); err != nil || fw != FrameworkTauri {
+		t.Fatalf("DetectFramework = %q, %v", fw, err)
+	}
+	if id, reason := BundleID(root, got, "Debug"); id != "example.generic.tauri" {
+		t.Fatalf("bundle id %q (%s)", id, reason)
+	}
+
+	// Once `tauri ios init` has run and gen/apple is committed it is the same app, not a second one.
+	mkdir(t, root, "src-tauri/gen/apple/app.xcodeproj")
+	got = resolve(t, root, "")
+	if got.Kind != KindTauri || got.Generated {
+		t.Fatalf("initialised Tauri app: %+v", *got)
+	}
+}
+
+func TestTauriInSubfolderAndTomlConfig(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "apps/desktop/src-tauri/Tauri.toml", "identifier = \"example.generic.toml\"\n")
+	got := resolve(t, root, "")
+	if got.AppPath != "apps/desktop" || got.IOSPath != "apps/desktop/src-tauri/gen/apple" {
+		t.Fatalf("got %+v", *got)
+	}
+	if id, _ := BundleID(root, got, "Debug"); id != "example.generic.toml" {
+		t.Fatalf("toml identifier not read: %q", id)
+	}
+}

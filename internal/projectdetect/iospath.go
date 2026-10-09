@@ -97,6 +97,10 @@ func layoutFor(root string, c Candidate) (*Layout, error) {
 	switch c.Kind {
 	case KindFlutter:
 		layout.IOSPath = join("ios")
+	case KindTauri:
+		// The Xcode project is committed under src-tauri/gen/apple or created by `tauri ios init`.
+		layout.IOSPath = join("src-tauri/gen/apple")
+		layout.Generated = !has("src-tauri/gen/apple")
 	case KindKMP:
 		for _, rel := range []string{"iosApp", "ios"} {
 			if has(rel) {

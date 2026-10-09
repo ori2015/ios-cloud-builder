@@ -21,6 +21,7 @@ const (
 	FrameworkKMP         = "kmp"
 	FrameworkCordova     = "cordova"
 	FrameworkIonic       = "ionic" // Ionic or plain Capacitor
+	FrameworkTauri       = "tauri" // Tauri 2 mobile
 )
 
 // ErrUnrecognized means nothing in the directory identifies a supported framework
@@ -40,6 +41,17 @@ var (
 	// templates must agree with it.
 	KMPPluginRe = regexp.MustCompile(`kotlin\("multiplatform"\)|org\.jetbrains\.kotlin\.multiplatform|id\(["']org\.jetbrains\.kotlin\.multiplatform["']\)`)
 )
+
+// HasTauriConfig reports whether dir holds a Tauri project: a src-tauri folder
+// with tauri.conf.json, tauri.conf.json5 or Tauri.toml.
+func HasTauriConfig(dir string) bool {
+	for _, name := range []string{"tauri.conf.json", "tauri.conf.json5", "Tauri.toml"} {
+		if fileExists(filepath.Join(dir, "src-tauri", name)) {
+			return true
+		}
+	}
+	return false
+}
 
 // IsFlutterPubspec reports whether pubspec contents describe a Flutter app.
 func IsFlutterPubspec(pubspec []byte) bool {
@@ -62,6 +74,9 @@ func IsCapacitorProject(root string) bool {
 func DetectFramework(appRoot string) (string, error) {
 	if pubspec, err := os.ReadFile(filepath.Join(appRoot, "pubspec.yaml")); err == nil && IsFlutterPubspec(pubspec) {
 		return FrameworkFlutter, nil
+	}
+	if HasTauriConfig(appRoot) {
+		return FrameworkTauri, nil
 	}
 	pkg, _ := os.ReadFile(filepath.Join(appRoot, "package.json"))
 	switch {
