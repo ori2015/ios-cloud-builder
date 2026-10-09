@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -99,6 +100,9 @@ func TestReadProjectFactsErrorsAreActionable(t *testing.T) {
 
 func registerFixture(t *testing.T, entry *registry.Project, cfg *config.Config) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the local registry backup requires POSIX mode bits")
+	}
 	value := registry.New()
 	if err := value.Put(cfg.ProjectID, entry); err != nil {
 		t.Fatal(err)
