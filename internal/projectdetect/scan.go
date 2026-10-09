@@ -46,7 +46,7 @@ var skipDirs = map[string]bool{
 var skipSuffixes = []string{".xcodeproj", ".xcworkspace", ".app", ".framework", ".xcframework", ".xcassets", ".bundle", ".lproj", ".playground"}
 
 var (
-	nodeMarkerRe     = regexp.MustCompile(`"(expo|react-native|cordova|ionic)"|"@(capacitor|ionic)/`)
+	nodeMarkerRe     = regexp.MustCompile(`"(expo|react-native|cordova|ionic|nativescript)"|"@(capacitor|ionic|nativescript)/`)
 	xcodegenTargetRe = regexp.MustCompile(`(?m)^targets:`)
 )
 
@@ -109,6 +109,9 @@ func classify(dir string) (Kind, bool) {
 	if HasTauriConfig(dir) {
 		return KindTauri, true
 	}
+	if HasNativeScriptConfig(dir) {
+		return KindNode, true
+	}
 	if pkg, err := os.ReadFile(filepath.Join(dir, "package.json")); err == nil && nodeMarkerRe.Match(pkg) {
 		return KindNode, true
 	}
@@ -125,6 +128,16 @@ func classify(dir string) (Kind, bool) {
 		return KindXcodeGen, true
 	}
 	return "", false
+}
+
+// HasNativeScriptConfig reports whether dir has a NativeScript config file.
+func HasNativeScriptConfig(dir string) bool {
+	for _, name := range []string{"nativescript.config.ts", "nativescript.config.js", "nativescript.config.json"} {
+		if fileExists(filepath.Join(dir, name)) {
+			return true
+		}
+	}
+	return false
 }
 
 func isCordovaConfig(dir string) bool {

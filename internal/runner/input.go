@@ -18,15 +18,16 @@ import (
 )
 
 const (
-	FrameworkAuto        = "auto"
-	FrameworkNative      = projectdetect.FrameworkNative
-	FrameworkFlutter     = projectdetect.FrameworkFlutter
-	FrameworkReactNative = projectdetect.FrameworkReactNative
-	FrameworkExpo        = projectdetect.FrameworkExpo
-	FrameworkKMP         = projectdetect.FrameworkKMP
-	FrameworkCordova     = projectdetect.FrameworkCordova
-	FrameworkIonic       = projectdetect.FrameworkIonic
-	FrameworkTauri       = projectdetect.FrameworkTauri
+	FrameworkAuto         = "auto"
+	FrameworkNative       = projectdetect.FrameworkNative
+	FrameworkFlutter      = projectdetect.FrameworkFlutter
+	FrameworkReactNative  = projectdetect.FrameworkReactNative
+	FrameworkExpo         = projectdetect.FrameworkExpo
+	FrameworkKMP          = projectdetect.FrameworkKMP
+	FrameworkCordova      = projectdetect.FrameworkCordova
+	FrameworkIonic        = projectdetect.FrameworkIonic
+	FrameworkTauri        = projectdetect.FrameworkTauri
+	FrameworkNativeScript = projectdetect.FrameworkNativeScript
 )
 
 // Operations accepted from workflow_dispatch. Only OperationBuild leaves the
@@ -142,7 +143,7 @@ func validateRelativePath(value string) error {
 func validFramework(framework string) bool {
 	switch framework {
 	case FrameworkAuto, FrameworkNative, FrameworkFlutter, FrameworkReactNative,
-		FrameworkExpo, FrameworkKMP, FrameworkCordova, FrameworkIonic, FrameworkTauri:
+		FrameworkExpo, FrameworkKMP, FrameworkCordova, FrameworkIonic, FrameworkTauri, FrameworkNativeScript:
 		return true
 	default:
 		return false

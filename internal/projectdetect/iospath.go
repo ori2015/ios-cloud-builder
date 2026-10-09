@@ -139,6 +139,8 @@ func generatedIOSDir(appDir string) (string, bool) {
 	switch {
 	case strings.Contains(string(pkg), `"expo"`):
 		return "ios", true
+	case HasNativeScriptConfig(appDir) || strings.Contains(string(pkg), `"@nativescript/core"`):
+		return "platforms/ios", true
 	case strings.Contains(string(pkg), `"cordova"`) || isCordovaConfig(appDir):
 		return "platforms/ios", true
 	}

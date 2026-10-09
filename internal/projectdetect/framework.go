@@ -14,14 +14,15 @@ import (
 // Framework names. They are the values stored in the project registry and
 // accepted by the runner.
 const (
-	FrameworkNative      = "native"
-	FrameworkFlutter     = "flutter"
-	FrameworkReactNative = "react-native"
-	FrameworkExpo        = "expo"
-	FrameworkKMP         = "kmp"
-	FrameworkCordova     = "cordova"
-	FrameworkIonic       = "ionic" // Ionic or plain Capacitor
-	FrameworkTauri       = "tauri" // Tauri 2 mobile
+	FrameworkNative       = "native"
+	FrameworkFlutter      = "flutter"
+	FrameworkReactNative  = "react-native"
+	FrameworkExpo         = "expo"
+	FrameworkKMP          = "kmp"
+	FrameworkCordova      = "cordova"
+	FrameworkIonic        = "ionic" // Ionic or plain Capacitor
+	FrameworkTauri        = "tauri" // Tauri 2 mobile
+	FrameworkNativeScript = "nativescript"
 )
 
 // ErrUnrecognized means nothing in the directory identifies a supported framework
@@ -33,6 +34,7 @@ var (
 	flutterSDKRe      = regexp.MustCompile(`(?m)^\s+sdk:\s*flutter\b`)
 	expoDepRe         = regexp.MustCompile(`"expo"\s*:`)
 	reactNativeDepRe  = regexp.MustCompile(`"react-native"\s*:`)
+	nativeScriptDepRe = regexp.MustCompile(`"(@nativescript/core|nativescript)"\s*:`)
 	ionicDepRe        = regexp.MustCompile(`"@ionic/|"ionic"\s*:`)
 	capacitorIOSRe    = regexp.MustCompile(`"@capacitor/ios"`)
 	cordovaDepRe      = regexp.MustCompile(`"cordova"\s*:`)
@@ -80,6 +82,8 @@ func DetectFramework(appRoot string) (string, error) {
 	}
 	pkg, _ := os.ReadFile(filepath.Join(appRoot, "package.json"))
 	switch {
+	case nativeScriptDepRe.Match(pkg) || HasNativeScriptConfig(appRoot):
+		return FrameworkNativeScript, nil
 	case expoDepRe.Match(pkg):
 		if hasIOSContainerBelow(appRoot, "ios") {
 			return FrameworkReactNative, nil

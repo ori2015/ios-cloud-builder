@@ -262,3 +262,19 @@ func TestTauriInSubfolderAndTomlConfig(t *testing.T) {
 		t.Fatalf("toml identifier not read: %q", id)
 	}
 }
+
+func TestNativeScriptDetection(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "package.json", `{"dependencies":{"@nativescript/core":"~8.8.0"}}`)
+	write(t, root, "nativescript.config.ts", "import { NativeScriptConfig } from '@nativescript/core';\nexport default {\n  id: 'example.generic.ns',\n  appPath: 'src',\n} as NativeScriptConfig;\n")
+	got := resolve(t, root, "")
+	if got.Kind != KindNode || got.IOSPath != "platforms/ios" || !got.Generated {
+		t.Fatalf("layout %+v", *got)
+	}
+	if fw, err := DetectFramework(root); err != nil || fw != FrameworkNativeScript {
+		t.Fatalf("DetectFramework = %q, %v", fw, err)
+	}
+	if id, why := BundleID(root, got, "Debug"); id != "example.generic.ns" {
+		t.Fatalf("bundle id %q (%s)", id, why)
+	}
+}
