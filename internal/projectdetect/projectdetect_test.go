@@ -278,3 +278,16 @@ func TestNativeScriptDetection(t *testing.T) {
 		t.Fatalf("bundle id %q (%s)", id, why)
 	}
 }
+
+func TestSparklingDetection(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "package.json", `{"dependencies":{"@lynx-js/react":"^0.116.2"},"devDependencies":{"sparkling-app-cli":"~2.0.1"}}`)
+	mkdir(t, root, "ios/SparklingGo.xcodeproj")
+	got := resolve(t, root, "")
+	if got.Kind != KindNode || got.IOSPath != "ios" || got.Generated {
+		t.Fatalf("layout %+v", *got)
+	}
+	if fw, err := DetectFramework(root); err != nil || fw != FrameworkSparkling {
+		t.Fatalf("DetectFramework = %q, %v", fw, err)
+	}
+}
