@@ -236,6 +236,20 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 		if iosPath := strings.TrimSpace(options.IOSPath); iosPath == "" || iosPath == "." {
 			iosRoot = filepath.Join(appRoot, "ios")
 		}
+	case FrameworkNativeScript:
+		// `ns prepare ios` generates platforms/ios/<name>.xcworkspace (or .xcodeproj when
+		// the app has no native iOS libraries); the shared Xcode build below compiles it.
+		args := []string{"--no-install", "nativescript", "prepare", "ios"}
+		if pkg, err := os.ReadFile(filepath.Join(appRoot, "package.json")); err != nil || !strings.Contains(string(pkg), `"nativescript"`) {
+			args[0] = "--yes" // the CLI is not a project dependency: fetch it
+		}
+		if options.Configuration == "Release" {
+			args = append(args, "--release")
+		}
+		if err := run.run(appRoot, "npx", args...); err != nil {
+			return err
+		}
+		iosRoot = filepath.Join(appRoot, "platforms", "ios")
 	case FrameworkCordova:
 		if err := run.run(appRoot, "npx", "--no-install", "cordova", "prepare", "ios"); err != nil {
 			return err
@@ -403,7 +417,7 @@ func verifyBuiltBundleID(appPath, expected string) error {
 }
 
 func isNodeFramework(framework string) bool {
-	return framework == FrameworkReactNative || framework == FrameworkExpo || framework == FrameworkCordova || framework == FrameworkIonic
+	return framework == FrameworkReactNative || framework == FrameworkExpo || framework == FrameworkCordova || framework == FrameworkIonic || framework == FrameworkNativeScript
 }
 
 func isCapacitorProject(root string) bool { return projectdetect.IsCapacitorProject(root) }

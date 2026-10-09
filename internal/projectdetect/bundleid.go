@@ -76,6 +76,9 @@ func BundleID(root string, layout *Layout, configuration string) (id, reason str
 		if id := capacitorBundleID(appDir); id != "" {
 			return validOrReason(id)
 		}
+		if id := nativeScriptBundleID(appDir); id != "" {
+			return validOrReason(id)
+		}
 	}
 	return "", "no literal PRODUCT_BUNDLE_IDENTIFIER found in the project"
 }
@@ -200,6 +203,23 @@ func tauriBundleID(appDir string) string {
 			return cfg.Identifier
 		}
 		if m := tauriIdentifierRe.FindSubmatch(data); m != nil {
+			return string(m[1])
+		}
+	}
+	return ""
+}
+
+var nativeScriptIDRe = regexp.MustCompile(`(?m)^\s*"?id"?\s*:\s*['"]([^'"]+)['"]`)
+
+// nativeScriptBundleID reads `id` from nativescript.config.* (the application id
+// NativeScript uses as the iOS bundle identifier).
+func nativeScriptBundleID(appDir string) string {
+	for _, name := range []string{"nativescript.config.json", "nativescript.config.ts", "nativescript.config.js"} {
+		data, err := os.ReadFile(filepath.Join(appDir, name))
+		if err != nil {
+			continue
+		}
+		if m := nativeScriptIDRe.FindSubmatch(data); m != nil {
 			return string(m[1])
 		}
 	}

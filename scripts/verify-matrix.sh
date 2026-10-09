@@ -109,6 +109,11 @@ put tauri package.json '{"devDependencies":{"@tauri-apps/cli":"^2.0.0"}}'
 put tauri src-tauri/tauri.conf.json '{"identifier":"example.generic.tauri"}'
 expect tauri "app_path= ios_path=src-tauri/gen/apple framework=tauri bundle_id=example.generic.tauri"
 
+# --- NativeScript
+put nativescript package.json '{"dependencies":{"@nativescript/core":"~8.8.0"}}'
+put nativescript nativescript.config.ts $'export default {\n  id: \'example.generic.ns\',\n  appPath: \'src\',\n};'
+expect nativescript "ios_path=platforms/ios framework=nativescript bundle_id=example.generic.ns"
+
 # --- Kotlin Multiplatform
 put kmp settings.gradle.kts 'rootProject.name = "generic"'
 put kmp shared/build.gradle.kts 'plugins { kotlin("multiplatform") }'
