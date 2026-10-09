@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -175,9 +176,22 @@ func TestE2EFrameworkExpo(t *testing.T) {
 		t.Fatal(err)
 	}
 	// prebuild needs an iOS bundle identifier; a real project sets it in app.json
-	patched := strings.Replace(string(data), `"expo": {`, `"expo": {
-    "ios": { "bundleIdentifier": "example.generic.expo" },`, 1)
-	if err := os.WriteFile(appJSON, []byte(patched), 0o600); err != nil {
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	expo, _ := config["expo"].(map[string]any)
+	ios, _ := expo["ios"].(map[string]any)
+	if ios == nil {
+		ios = map[string]any{}
+	}
+	ios["bundleIdentifier"] = "example.generic.expo"
+	expo["ios"] = ios
+	patched, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(appJSON, patched, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	buildDetected(t, filepath.Join(root, "app"), FrameworkExpo)

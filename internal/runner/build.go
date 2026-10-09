@@ -440,7 +440,7 @@ func verifyBuiltBundleID(appPath, expected string) error {
 		return fmt.Errorf("read built application identity: %w", err)
 	}
 	if built != expected {
-		return fmt.Errorf("built application identity does not match the registered project")
+		return fmt.Errorf("built application identity %q does not match the registered project's %q (the log is private); fix the bundle identifier in the project or register again", built, expected)
 	}
 	return nil
 }
