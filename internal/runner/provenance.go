@@ -44,6 +44,9 @@ type ProvenanceManifest struct {
 	// AssociatedDomains holds sanitised applinks:<host> entries the project
 	// declared. The signing job substitutes them for the profile's wildcard.
 	AssociatedDomains []string `json:"associated_domains,omitempty"`
+	// ICloudServices holds allowlisted iCloud services the project requested.
+	// The signing job substitutes them for the profile's "*" template value.
+	ICloudServices []string `json:"icloud_services,omitempty"`
 }
 
 type ProvenanceExpectation struct {
@@ -122,7 +125,8 @@ func trustedPackageWithPackager(ctx context.Context, options *TrustedPackageOpti
 	if err := validateTrustedApplication(appPath); err != nil {
 		return err
 	}
-	associatedDomains := takeAssociatedDomainsRequest(appPath, privateLog)
+	entitlementsRequest := takeEntitlementsRequest(appPath, privateLog)
+	associatedDomains := entitlementsRequest.Domains
 	privateHome := filepath.Join(workRoot, "home")
 	if err := os.Mkdir(privateHome, 0700); err != nil {
 		return errors.New("prepare trusted packaging home")
@@ -151,6 +155,7 @@ func trustedPackageWithPackager(ctx context.Context, options *TrustedPackageOpti
 	if err != nil {
 		return err
 	}
+	manifest.ICloudServices = entitlementsRequest.ICloudServices
 	data, err := json.Marshal(manifest)
 	if err != nil {
 		return errors.New("create provenance manifest")
@@ -240,6 +245,9 @@ func ValidateProvenanceArtifact(dir string, expected ProvenanceExpectation) (*Pr
 		return nil, errors.New("provenance identity mismatch")
 	}
 	if err := validateAssociatedDomains(manifest.AssociatedDomains); err != nil {
+		return nil, err
+	}
+	if err := validateICloudServices(manifest.ICloudServices); err != nil {
 		return nil, err
 	}
 	digest, err := hashRegularFile(filepath.Join(dir, trustedIPAFile), maxDeployIPABytes+1024*1024)

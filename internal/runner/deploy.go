@@ -245,6 +245,7 @@ func signAdHoc(ctx context.Context, options *AdHocOptions, manifest *ProvenanceM
 		privateLog:  privateLog,
 
 		associatedDomains: manifest.AssociatedDomains,
+		icloudServices:    manifest.ICloudServices,
 	}); err != nil {
 		return "", err
 	}
@@ -415,6 +416,7 @@ func deployTestFlight(ctx context.Context, options *TestFlightOptions, manifest 
 		privateLog:  privateLog,
 
 		associatedDomains: manifest.AssociatedDomains,
+		icloudServices:    manifest.ICloudServices,
 	}); err != nil {
 		return err
 	}
@@ -483,6 +485,7 @@ type signRequest struct {
 	// associatedDomains are the authenticated, sanitised applinks:<host> entries
 	// from the provenance manifest; see mergeAssociatedDomains.
 	associatedDomains []string
+	icloudServices    []string
 }
 
 // signApplicationInPlace imports the distribution identity, selects or creates a
@@ -550,6 +553,7 @@ func signApplicationInPlace(ctx context.Context, req *signRequest) error {
 		provider: provider, static: profilePaths, teamID: credentials.teamID, fingerprint: identityFingerprint,
 		profileType: req.profileType, secretsDir: req.secretsDir, log: req.privateLog,
 		associatedDomains: req.associatedDomains,
+		icloudServices:    req.icloudServices,
 	}
 	return signer.signPlan(ctx, req.plan)
 }

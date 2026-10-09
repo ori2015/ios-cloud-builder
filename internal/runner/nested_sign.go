@@ -46,6 +46,7 @@ type planSigner struct {
 	log         io.Writer
 	// associatedDomains apply to the main application only.
 	associatedDomains []string
+	icloudServices    []string
 }
 
 // signPlan signs every step inside-out. It selects or creates one profile per
@@ -88,11 +89,14 @@ func (s *planSigner) signPlan(ctx context.Context, plan *signingPlan) error {
 		}
 		entitlements := profile.Entitlements
 		domains := []string(nil)
+		services := []string(nil)
 		if step.Kind == kindApp {
 			domains = s.associatedDomains
+			services = s.icloudServices
 		} else {
 			entitlements = distributionEntitlements(entitlements, s.teamID)
 		}
+		entitlements = narrowICloudEntitlements(entitlements, services, s.teamID, step.BundleID)
 		entitlementsPath := filepath.Join(s.secretsDir, fmt.Sprintf("entitlements-%03d.plist", index))
 		if err := writeSigningEntitlements(entitlementsPath, entitlements, domains); err != nil {
 			return fmt.Errorf("prepare signing entitlements")
