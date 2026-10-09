@@ -153,3 +153,66 @@ application/min_ios_version="14.0"
 	layoutRoot := filepath.Join(root, "game")
 	buildDetectedWith(t, layoutRoot, FrameworkGodot, func(o *BuildOptions) { o.GodotDir = godotDir })
 }
+
+func TestE2EFrameworkFlutter(t *testing.T) {
+	requireFrameworkE2E(t, "flutter")
+	root := t.TempDir()
+	scaffold(t, root, "flutter", "create", "generic_app", "--org", "example.generic", "--platforms", "ios", "--no-pub")
+	buildDetected(t, filepath.Join(root, "generic_app"), FrameworkFlutter)
+}
+
+// A managed Expo app has no ios/ folder; the pipeline runs expo prebuild.
+func TestE2EFrameworkExpo(t *testing.T) {
+	requireFrameworkE2E(t, "expo")
+	root := t.TempDir()
+	scaffold(t, root, "npx", "--yes", "create-expo-app@latest", "app", "--template", "blank", "--no-install", "--yes")
+	appJSON := filepath.Join(root, "app", "app.json")
+	data, err := os.ReadFile(appJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// prebuild needs an iOS bundle identifier; a real project sets it in app.json
+	patched := strings.Replace(string(data), `"expo": {`, `"expo": {
+    "ios": { "bundleIdentifier": "example.generic.expo" },`, 1)
+	if err := os.WriteFile(appJSON, []byte(patched), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	buildDetected(t, filepath.Join(root, "app"), FrameworkExpo)
+}
+
+func TestE2EFrameworkReactNative(t *testing.T) {
+	requireFrameworkE2E(t, "react-native")
+	root := t.TempDir()
+	scaffold(t, root, "npx", "--yes", "@react-native-community/cli@latest", "init", "Generic", "--skip-install", "--skip-git-init")
+	buildDetected(t, filepath.Join(root, "Generic"), FrameworkReactNative)
+}
+
+// A Capacitor app with a web build step; ios/App is committed as in real projects.
+func TestE2EFrameworkCapacitor(t *testing.T) {
+	requireFrameworkE2E(t, "capacitor")
+	root := t.TempDir()
+	scaffold(t, root, "npm", "create", "vite@latest", "web", "--", "--template", "vanilla")
+	app := filepath.Join(root, "web")
+	scaffold(t, app, "npm", "install")
+	scaffold(t, app, "npm", "install", "@capacitor/core", "@capacitor/ios")
+	scaffold(t, app, "npm", "install", "-D", "@capacitor/cli")
+	scaffold(t, app, "npx", "cap", "init", "Generic", "example.generic.cap", "--web-dir", "dist")
+	scaffold(t, app, "npm", "run", "build")
+	scaffold(t, app, "npx", "cap", "add", "ios")
+	// the build output is not committed; the pipeline must rebuild it
+	if err := os.RemoveAll(filepath.Join(app, "dist")); err != nil {
+		t.Fatal(err)
+	}
+	buildDetected(t, app, FrameworkIonic)
+}
+
+func TestE2EFrameworkCordova(t *testing.T) {
+	requireFrameworkE2E(t, "cordova")
+	root := t.TempDir()
+	scaffold(t, root, "npx", "--yes", "cordova", "create", "app", "example.generic.cordova", "Generic")
+	app := filepath.Join(root, "app")
+	writeFile(t, app, "package.json", `{"name":"generic","version":"1.0.0","devDependencies":{"cordova":"latest"}}`)
+	scaffold(t, app, "npm", "install", "-D", "cordova", "cordova-ios")
+	scaffold(t, app, "npx", "cordova", "platform", "add", "ios", "--save")
+	buildDetected(t, app, FrameworkCordova)
+}
