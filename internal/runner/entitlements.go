@@ -114,12 +114,18 @@ func copyEntitlementsRequest(derivedData, appPath, configuration string, log io.
 	return false
 }
 
+// requestsAssociatedDomains reports whether the project entitlements ask for
+// anything this package honours: associated domains or iCloud services.
 func requestsAssociatedDomains(data []byte) bool {
-	var request struct {
-		Domains []string `plist:"com.apple.developer.associated-domains"`
-	}
+	var request entitlementsRequest
 	_, err := plist.Unmarshal(data, &request)
-	return err == nil && len(request.Domains) > 0
+	return err == nil && (len(request.Domains) > 0 || len(request.ICloudServices) > 0)
+}
+
+// entitlementsRequest is the part of the project's entitlements that is read.
+type entitlementsRequest struct {
+	Domains        []string `plist:"com.apple.developer.associated-domains"`
+	ICloudServices []string `plist:"com.apple.developer.icloud-services"`
 }
 
 // entitlementsFileFromBuildSettings finds the project's own entitlements file
@@ -186,22 +192,36 @@ func recordEntitlementsFromSettings(run executor, iosRoot, sourceRoot string, co
 // removed so it can never be signed into the bundle. Problems never fail the
 // build; they only mean no domains are requested.
 func takeAssociatedDomainsRequest(appPath string, log io.Writer) []string {
+	return takeEntitlementsRequest(appPath, log).Domains
+}
+
+// sanitisedRequest holds the validated values taken from the request file.
+type sanitisedRequest struct {
+	Domains        []string
+	ICloudServices []string
+}
+
+// takeEntitlementsRequest is takeAssociatedDomainsRequest plus the requested
+// iCloud services, which are kept only if they are on the allowlist.
+func takeEntitlementsRequest(appPath string, log io.Writer) sanitisedRequest {
 	path := filepath.Join(appPath, entitlementsRequestFile)
 	data, err := readBoundedRegularFile(path, maxEntitlementsRequestBytes)
 	_ = os.Remove(path)
 	if err != nil {
-		return nil
+		return sanitisedRequest{}
 	}
-	var request struct {
-		Domains []string `plist:"com.apple.developer.associated-domains"`
-	}
+	var request entitlementsRequest
 	if _, err := plist.Unmarshal(data, &request); err != nil {
 		_, _ = fmt.Fprintln(log, "The recorded build entitlements were not a valid property list and were ignored.")
-		return nil
+		return sanitisedRequest{}
 	}
 	kept, dropped := sanitizeAssociatedDomains(request.Domains)
 	_, _ = fmt.Fprintf(log, "Accepted %d associated domain request(s); ignored %d.\n", len(kept), dropped)
-	return kept
+	services := sanitizeICloudServices(request.ICloudServices)
+	if len(services) > 0 {
+		_, _ = fmt.Fprintf(log, "Accepted %d iCloud service request(s).\n", len(services))
+	}
+	return sanitisedRequest{Domains: kept, ICloudServices: services}
 }
 
 func readBoundedRegularFile(path string, limit int64) ([]byte, error) {
@@ -270,4 +290,114 @@ func writeSigningEntitlements(path string, profileEntitlements map[string]any, r
 		return err
 	}
 	return os.WriteFile(path, data, 0600)
+}
+
+const (
+	iCloudServicesKey        = "com.apple.developer.icloud-services"
+	iCloudEnvironmentKey     = "com.apple.developer.icloud-container-environment"
+	iCloudDevContainersKey   = "com.apple.developer.icloud-container-development-container-identifiers"
+	iCloudKVStoreKey         = "com.apple.developer.ubiquity-kvstore-identifier"
+	maxICloudServiceRequests = 8
+)
+
+// allowedICloudServices are the only values a project may request.
+var allowedICloudServices = map[string]bool{"CloudKit": true, "CloudDocuments": true, "CloudKit-Anonymous": true}
+
+// sanitizeICloudServices keeps allowlisted, de-duplicated services in a stable order.
+func sanitizeICloudServices(values []string) []string {
+	seen := map[string]bool{}
+	var kept []string
+	for _, value := range values {
+		if allowedICloudServices[value] && !seen[value] && len(kept) < maxICloudServiceRequests {
+			seen[value] = true
+			kept = append(kept, value)
+		}
+	}
+	sort.Strings(kept)
+	return kept
+}
+
+// validateICloudServices rejects anything the sanitiser would not have produced.
+func validateICloudServices(values []string) error {
+	if len(values) > maxICloudServiceRequests {
+		return errors.New("too many iCloud services")
+	}
+	for _, value := range values {
+		if !allowedICloudServices[value] {
+			return errors.New("invalid iCloud service")
+		}
+	}
+	return nil
+}
+
+// narrowICloudEntitlements turns the profile's iCloud template values into the
+// concrete ones an App Store signature needs, the way Xcode does when it
+// signs for distribution. Apple profiles carry "*" services, both container
+// environments, a development container list and a "TEAM.*" key-value store;
+// App Store Connect rejects those in a signature. Every change only narrows
+// what the profile already grants. Without iCloud in the profile the map is
+// returned unchanged. The profile's map is never modified.
+func narrowICloudEntitlements(profile map[string]any, requestedServices []string, teamID, bundleID string) map[string]any {
+	_, hasServices := profile[iCloudServicesKey]
+	_, hasEnvironment := profile[iCloudEnvironmentKey]
+	_, hasKVStore := profile[iCloudKVStoreKey]
+	if !hasServices && !hasEnvironment && !hasKVStore {
+		return profile
+	}
+	out := make(map[string]any, len(profile))
+	for key, value := range profile {
+		out[key] = value
+	}
+	delete(out, iCloudDevContainersKey)
+	if values := stringList(out[iCloudEnvironmentKey]); len(values) > 0 {
+		for _, value := range values {
+			if value == "Production" {
+				out[iCloudEnvironmentKey] = "Production"
+			}
+		}
+	}
+	if granted, ok := out[iCloudServicesKey]; ok {
+		list := stringList(granted)
+		allowAll := false
+		allowed := map[string]bool{}
+		for _, value := range list {
+			allowAll = allowAll || value == "*"
+			allowed[value] = true
+		}
+		var narrowed []string
+		for _, service := range requestedServices {
+			if allowAll || allowed[service] {
+				narrowed = append(narrowed, service)
+			}
+		}
+		switch {
+		case len(narrowed) > 0:
+			out[iCloudServicesKey] = narrowed
+		case allowAll:
+			delete(out, iCloudServicesKey)
+		}
+	}
+	if kv, ok := out[iCloudKVStoreKey].(string); ok && teamID != "" && bundleID != "" && strings.HasSuffix(kv, ".*") {
+		out[iCloudKVStoreKey] = teamID + "." + bundleID
+	}
+	return out
+}
+
+// stringList reads a plist string or string array.
+func stringList(value any) []string {
+	switch v := value.(type) {
+	case string:
+		return []string{v}
+	case []string:
+		return v
+	case []any:
+		var out []string
+		for _, item := range v {
+			if text, ok := item.(string); ok {
+				out = append(out, text)
+			}
+		}
+		return out
+	}
+	return nil
 }
