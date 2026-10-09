@@ -85,3 +85,59 @@ func TestIsFlutterPubspec(t *testing.T) {
 		}
 	}
 }
+
+func TestUnsupportedEnginesAreNamedNotGuessed(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, r string)
+		want  string
+	}{
+		{"unity", func(t *testing.T, r string) {
+			write(t, r, "ProjectSettings/ProjectVersion.txt", "m_EditorVersion: 2022.3.0f1")
+		}, "Unity"},
+		{"godot with an ios preset", func(t *testing.T, r string) {
+			write(t, r, "project.godot", "config_version=5")
+			write(t, r, "export_presets.cfg", "[preset.0]\nname=\"iOS\"\nplatform=\"iOS\"\n")
+		}, "Godot"},
+		{"maui", func(t *testing.T, r string) {
+			write(t, r, "App.csproj", "<Project><PropertyGroup><TargetFrameworks>net8.0-ios;net8.0-android</TargetFrameworks><UseMaui>true</UseMaui></PropertyGroup></Project>")
+		}, "MAUI"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			tc.setup(t, root)
+			_, err := DetectFramework(root)
+			if !errors.Is(err, ErrUnsupportedFramework) || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "--app-path") {
+				t.Fatalf("err = %v", err)
+			}
+			if _, err := Resolve(root, ""); err != nil {
+				t.Fatalf("setup must still find the project so the engine can be named: %v", err)
+			}
+		})
+	}
+}
+
+func TestEngineWithoutIOSTargetIsNotFlagged(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "project.godot", "config_version=5")
+	write(t, root, "export_presets.cfg", "[preset.0]\nplatform=\"Windows Desktop\"\n")
+	write(t, root, "Lib.csproj", "<Project><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>")
+	if engine, _ := UnsupportedEngine(root); engine != "" {
+		t.Fatalf("flagged %q without an iOS target", engine)
+	}
+}
+
+func TestExportedEngineProjectBuildsAsNative(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "ProjectSettings/ProjectVersion.txt", "m_EditorVersion: 2022.3.0f1")
+	mkdir(t, root, "Builds/ios/Unity-iPhone.xcodeproj")
+	// two candidates: the engine root and its exported Xcode project; the user picks the export
+	if _, err := Resolve(root, ""); !errors.Is(err, ErrAmbiguous) {
+		t.Fatalf("want ambiguity, got %v", err)
+	}
+	layout := resolve(t, root, "Builds/ios")
+	if fw, err := DetectFramework(root + "/Builds/ios"); err != nil || fw != FrameworkNative || layout.Kind != KindXcode {
+		t.Fatalf("exported project: %q %v %+v", fw, err, layout)
+	}
+}

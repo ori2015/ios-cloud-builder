@@ -143,6 +143,15 @@ pbx two-apps b/ios/Runner.xcodeproj/project.pbxproj example.generic.b
 expect_error two-apps "--app-path"
 expect two-apps "app_path=b ios_path=b/ios framework=flutter bundle_id=example.generic.b" --app-path b
 
+# Engines that are recognised but not built must say so and how to proceed
+put unity ProjectSettings/ProjectVersion.txt "m_EditorVersion: 2022.3.0f1"
+expect_error unity "Unity is recognised"
+put godot project.godot "config_version=5"
+put godot export_presets.cfg $'[preset.0]\nplatform="iOS"'
+expect_error godot "Godot is recognised"
+put maui App.csproj '<Project><PropertyGroup><TargetFrameworks>net8.0-ios</TargetFrameworks><UseMaui>true</UseMaui></PropertyGroup></Project>'
+expect_error maui "MAUI is recognised"
+
 put empty README.md "nothing here"
 expect_error empty "pubspec.yaml"
 

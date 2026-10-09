@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -35,6 +36,9 @@ func DetectFramework(sourceRoot, hint string) (string, error) {
 		return hint, nil
 	}
 	framework, err := projectdetect.DetectFramework(sourceRoot)
+	if errors.Is(err, projectdetect.ErrUnsupportedFramework) {
+		return "", err
+	}
 	if err != nil {
 		// Nothing identifiable: keep the long-standing behaviour of building the
 		// directory as a native Xcode project, which reports a precise error if it is not one.
