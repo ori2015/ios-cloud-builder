@@ -145,6 +145,8 @@ jobs:
 
       - name: Install Godot
         if: matrix.framework == 'godot'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: scripts/install-godot.sh 4.4 "$RUNNER_TEMP/godot"
 
       - name: Build ${{ matrix.framework }} and inspect the IPA
