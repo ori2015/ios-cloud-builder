@@ -16,7 +16,7 @@ func ChildEnvironment(sourceRoot, privateHome string) []string {
 		"JAVA_HOME": true, "FLUTTER_ROOT": true, "PUB_CACHE": true,
 		"GEM_HOME": true, "GEM_PATH": true, "COCOAPODS_HOME": true,
 		"NODE_PATH": true, "NVM_DIR": true,
-		"CARGO_HOME": true, "RUSTUP_HOME": true,
+		"CARGO_HOME": true, "RUSTUP_HOME": true, "DOTNET_ROOT": true,
 	}
 	env := make([]string, 0, len(allowed)+8)
 	for _, entry := range os.Environ() {
@@ -28,6 +28,8 @@ func ChildEnvironment(sourceRoot, privateHome string) []string {
 	return append(env,
 		"HOME="+privateHome,
 		"CI=true",
+		"DOTNET_CLI_TELEMETRY_OPTOUT=1",
+		"DOTNET_NOLOGO=1",
 		"CODE_SIGNING_ALLOWED=NO",
 		"CODE_SIGNING_REQUIRED=NO",
 		"COMPILER_INDEX_STORE_ENABLE=NO",

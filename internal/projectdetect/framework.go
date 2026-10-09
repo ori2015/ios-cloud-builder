@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -24,6 +25,7 @@ const (
 	FrameworkTauri        = "tauri" // Tauri 2 mobile
 	FrameworkNativeScript = "nativescript"
 	FrameworkSparkling    = "sparkling" // Lynx app framework with a committed ios/ project
+	FrameworkMAUI         = "maui"      // .NET MAUI
 )
 
 // ErrUnsupportedFramework means the project is a recognised engine that this
@@ -104,6 +106,9 @@ func DetectFramework(appRoot string) (string, error) {
 	case cordovaDepRe.Match(pkg) || isCordovaConfig(appRoot):
 		return FrameworkCordova, nil
 	}
+	if _, _, ok := MAUIProject(appRoot); ok {
+		return FrameworkMAUI, nil
+	}
 	if engine, reason := UnsupportedEngine(appRoot); engine != "" {
 		return "", fmt.Errorf("%w: %s", ErrUnsupportedFramework, reason)
 	}
@@ -149,7 +154,7 @@ var (
 )
 
 // UnsupportedEngine recognises engines whose iOS build is not implemented:
-// .NET MAUI, Godot and Unity. It returns the engine name and a one-sentence
+// Godot and Unity. It returns the engine name and a one-sentence
 // reason that says what is missing and what to do instead.
 func UnsupportedEngine(dir string) (engine, reason string) {
 	const exportAdvice = " Export the iOS Xcode project from the engine, commit it, and register that folder with --app-path; it then builds as a native project."
@@ -162,12 +167,23 @@ func UnsupportedEngine(dir string) (engine, reason string) {
 			return "godot", "Godot is recognised but not built: exporting needs the Godot editor and export templates on the runner, which are not installed or verified here." + exportAdvice
 		}
 	}
+	return "", ""
+}
+
+// MAUIProject finds the .NET MAUI project in dir: a *.csproj that sets UseMaui
+// and targets iOS. It returns the file name and the iOS target framework
+// moniker (for example net8.0-ios).
+func MAUIProject(dir string) (csproj, tfm string, ok bool) {
 	matches, _ := filepath.Glob(filepath.Join(dir, "*.csproj"))
-	for _, csproj := range matches {
-		data, err := os.ReadFile(csproj)
-		if err == nil && len(data) < 1<<20 && strings.Contains(string(data), "<UseMaui>true</UseMaui>") && mauiTFMRe.Match(data) {
-			return "maui", ".NET MAUI is recognised but not built: `dotnet publish -f net<X>-ios` signs the app and no unsigned MAUI build switch has been verified." + exportAdvice
+	sort.Strings(matches)
+	for _, match := range matches {
+		data, err := os.ReadFile(match)
+		if err != nil || len(data) > 1<<20 || !strings.Contains(string(data), "<UseMaui>true</UseMaui>") {
+			continue
+		}
+		if found := mauiTFMRe.Find(data); found != nil {
+			return filepath.Base(match), string(found), true
 		}
 	}
-	return "", ""
+	return "", "", false
 }

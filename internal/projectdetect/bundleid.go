@@ -64,6 +64,16 @@ func BundleID(root string, layout *Layout, configuration string) (id, reason str
 			return pickAppID(literal)
 		}
 	}
+	if layout.Kind == KindMAUI {
+		if csproj, _, ok := MAUIProject(appDir); ok {
+			if data, err := os.ReadFile(filepath.Join(appDir, csproj)); err == nil {
+				if m := mauiApplicationIDRe.FindSubmatch(data); m != nil {
+					return validOrReason(string(m[1]))
+				}
+			}
+		}
+		return "", "the MAUI project sets no literal <ApplicationId>"
+	}
 	if layout.Kind == KindTauri {
 		if id := tauriBundleID(appDir); id != "" {
 			return validOrReason(id)
@@ -186,6 +196,8 @@ func capacitorBundleID(appDir string) string {
 	}
 	return ""
 }
+
+var mauiApplicationIDRe = regexp.MustCompile(`<ApplicationId>([^<$]+)</ApplicationId>`)
 
 var tauriIdentifierRe = regexp.MustCompile(`(?m)^\s*"?identifier"?\s*[:=]\s*["']([^"']+)["']`)
 

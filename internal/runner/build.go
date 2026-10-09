@@ -226,6 +226,12 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 		}
 		return buildTauri(run, appRoot, options)
 	}
+	if options.Framework == FrameworkMAUI {
+		if options.RunTests {
+			return fmt.Errorf("simulator tests are supported for native Xcode and XcodeGen projects only")
+		}
+		return buildMAUI(run, appRoot, options)
+	}
 	iosRoot := filepath.Join(sourceRoot, options.IOSPath)
 	switch options.Framework {
 	case FrameworkExpo:

@@ -154,8 +154,8 @@ expect_error unity "Unity is recognised"
 put godot project.godot "config_version=5"
 put godot export_presets.cfg $'[preset.0]\nplatform="iOS"'
 expect_error godot "Godot is recognised"
-put maui App.csproj '<Project><PropertyGroup><TargetFrameworks>net8.0-ios</TargetFrameworks><UseMaui>true</UseMaui></PropertyGroup></Project>'
-expect_error maui "MAUI is recognised"
+put maui App.csproj '<Project><PropertyGroup><TargetFrameworks>net8.0-ios</TargetFrameworks><UseMaui>true</UseMaui><ApplicationId>example.generic.maui</ApplicationId></PropertyGroup></Project>'
+expect maui "ios_path= framework=maui bundle_id=example.generic.maui"
 
 put empty README.md "nothing here"
 expect_error empty "pubspec.yaml"
