@@ -136,6 +136,10 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install Tauri iOS prerequisites
+        if: matrix.framework == 'tauri'
+        run: brew install xcodegen libimobiledevice
+
       - name: Build ${{ matrix.framework }} and inspect the IPA
         env:
           BUILDER_E2E_FRAMEWORKS: ${{ matrix.framework }}
