@@ -226,11 +226,27 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 		}
 		return buildTauri(run, appRoot, options)
 	}
+	if options.Framework == FrameworkMAUI {
+		if options.RunTests {
+			return fmt.Errorf("simulator tests are supported for native Xcode and XcodeGen projects only")
+		}
+		return buildMAUI(run, appRoot, options)
+	}
 	iosRoot := filepath.Join(sourceRoot, options.IOSPath)
 	switch options.Framework {
 	case FrameworkExpo:
 		// Managed Expo projects commit no ios/ directory; prebuild generates it (and runs pod install).
 		if err := run.run(appRoot, "npx", "--no-install", "expo", "prebuild", "--platform", "ios"); err != nil {
+			return err
+		}
+		if iosPath := strings.TrimSpace(options.IOSPath); iosPath == "" || iosPath == "." {
+			iosRoot = filepath.Join(appRoot, "ios")
+		}
+	case FrameworkSparkling:
+		// `sparkling-app-cli build --copy` compiles the Lynx bundles and copies them into
+		// the committed ios/ project; pod install and xcodebuild below build that project.
+		program, args := scriptCommand(appRoot, "build")
+		if err := run.run(appRoot, program, args...); err != nil {
 			return err
 		}
 		if iosPath := strings.TrimSpace(options.IOSPath); iosPath == "" || iosPath == "." {
@@ -417,7 +433,7 @@ func verifyBuiltBundleID(appPath, expected string) error {
 }
 
 func isNodeFramework(framework string) bool {
-	return framework == FrameworkReactNative || framework == FrameworkExpo || framework == FrameworkCordova || framework == FrameworkIonic || framework == FrameworkNativeScript
+	return framework == FrameworkReactNative || framework == FrameworkExpo || framework == FrameworkCordova || framework == FrameworkIonic || framework == FrameworkNativeScript || framework == FrameworkSparkling
 }
 
 func isCapacitorProject(root string) bool { return projectdetect.IsCapacitorProject(root) }
@@ -437,6 +453,18 @@ func makeGradleWrapperExecutable(root string) error {
 	return nil
 }
 
+// npmInstallWithFallback runs `npm <command>` and, if it fails, once more with
+// --legacy-peer-deps. Fresh scaffolds of some frameworks fail the strict resolver
+// (npm: "Cannot read properties of null (reading 'edgesOut')") yet install with it.
+func npmInstallWithFallback(run executor, root, command string) error {
+	err := run.run(root, "npm", command)
+	if err == nil {
+		return nil
+	}
+	fmt.Fprintf(run.log, "\nnpm %s failed; retrying with --legacy-peer-deps\n", command)
+	return run.run(root, "npm", command, "--legacy-peer-deps")
+}
+
 func installNodeDependencies(run executor, root string) error {
 	switch {
 	case exists(filepath.Join(root, "pnpm-lock.yaml")):
@@ -444,9 +472,9 @@ func installNodeDependencies(run executor, root string) error {
 	case exists(filepath.Join(root, "yarn.lock")):
 		return run.run(root, "corepack", "yarn", "install", "--frozen-lockfile")
 	case exists(filepath.Join(root, "package-lock.json")):
-		return run.run(root, "npm", "ci")
+		return npmInstallWithFallback(run, root, "ci")
 	default:
-		return run.run(root, "npm", "install")
+		return npmInstallWithFallback(run, root, "install")
 	}
 }
 

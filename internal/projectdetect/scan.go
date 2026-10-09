@@ -25,6 +25,7 @@ const (
 	KindXcode    Kind = "xcode"
 	KindXcodeGen Kind = "xcodegen"
 	KindTauri    Kind = "tauri"
+	KindMAUI     Kind = "maui"
 	// KindUnsupported marks engines that are recognised but not built (see UnsupportedEngine).
 	KindUnsupported Kind = "unsupported"
 )
@@ -48,7 +49,7 @@ var skipDirs = map[string]bool{
 var skipSuffixes = []string{".xcodeproj", ".xcworkspace", ".app", ".framework", ".xcframework", ".xcassets", ".bundle", ".lproj", ".playground"}
 
 var (
-	nodeMarkerRe     = regexp.MustCompile(`"(expo|react-native|cordova|ionic|nativescript)"|"@(capacitor|ionic|nativescript)/`)
+	nodeMarkerRe     = regexp.MustCompile(`"(expo|react-native|cordova|ionic|nativescript|sparkling-app-cli)"|"@(capacitor|ionic|nativescript)/`)
 	xcodegenTargetRe = regexp.MustCompile(`(?m)^targets:`)
 )
 
@@ -114,6 +115,9 @@ func classify(dir string) (Kind, bool) {
 	if HasNativeScriptConfig(dir) {
 		return KindNode, true
 	}
+	if _, _, ok := MAUIProject(dir); ok {
+		return KindMAUI, true
+	}
 	if engine, _ := UnsupportedEngine(dir); engine != "" {
 		return KindUnsupported, true
 	}
@@ -169,7 +173,7 @@ func foldNested(found []Candidate) []Candidate {
 	for _, c := range found {
 		shadowed := false
 		for _, other := range found {
-			if other.Path == c.Path || (other.Kind != KindFlutter && other.Kind != KindNode && other.Kind != KindKMP && other.Kind != KindTauri) {
+			if other.Path == c.Path || (other.Kind != KindFlutter && other.Kind != KindNode && other.Kind != KindKMP && other.Kind != KindTauri && other.Kind != KindMAUI) {
 				continue
 			}
 			if isUnder(other.Path, c.Path) {
