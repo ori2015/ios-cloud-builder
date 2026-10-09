@@ -1,10 +1,10 @@
 package runner
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/MobAI-App/ios-builder/internal/projectdetect"
 )
 
 // DetectFrameworkAt is DetectFramework for an app that lives in appPath, a
@@ -31,47 +31,13 @@ func DetectFramework(sourceRoot, hint string) (string, error) {
 	if hint != FrameworkAuto {
 		return hint, nil
 	}
-	if exists(filepath.Join(sourceRoot, "pubspec.yaml")) {
-		return FrameworkFlutter, nil
+	framework, err := projectdetect.DetectFramework(sourceRoot)
+	if err != nil {
+		// Nothing identifiable: keep the long-standing behaviour of building the
+		// directory as a native Xcode project, which reports a precise error if it is not one.
+		return FrameworkNative, nil
 	}
-	pkg, _ := os.ReadFile(filepath.Join(sourceRoot, "package.json"))
-	switch {
-	case bytes.Contains(pkg, []byte(`"expo"`)):
-		return FrameworkExpo, nil
-	case bytes.Contains(pkg, []byte(`"react-native"`)):
-		return FrameworkReactNative, nil
-	case bytes.Contains(pkg, []byte(`"@ionic/`)) || bytes.Contains(pkg, []byte(`"ionic"`)) ||
-		(bytes.Contains(pkg, []byte(`"@capacitor/ios"`)) && isCapacitorProject(sourceRoot)):
-		return FrameworkIonic, nil
-	case bytes.Contains(pkg, []byte(`"cordova"`)) || exists(filepath.Join(sourceRoot, "config.xml")):
-		return FrameworkCordova, nil
-	}
-	foundKMP := false
-	_ = filepath.WalkDir(sourceRoot, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || foundKMP {
-			return filepath.SkipAll
-		}
-		if entry.IsDir() {
-			if path != sourceRoot && (strings.HasPrefix(entry.Name(), ".") || entry.Name() == "node_modules" || entry.Name() == "Pods") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if entry.Name() != "build.gradle" && entry.Name() != "build.gradle.kts" && entry.Name() != "libs.versions.toml" {
-			return nil
-		}
-		contents, readErr := os.ReadFile(path)
-		if readErr == nil && (bytes.Contains(contents, []byte("kotlin(\"multiplatform\")")) ||
-			bytes.Contains(contents, []byte("org.jetbrains.kotlin.multiplatform"))) {
-			foundKMP = true
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	if foundKMP {
-		return FrameworkKMP, nil
-	}
-	return FrameworkNative, nil
+	return framework, nil
 }
 
 func exists(path string) bool {

@@ -185,7 +185,9 @@ func TestDetectFramework(t *testing.T) {
 	tests := []struct {
 		name, path, content, want string
 	}{
-		{"flutter", "pubspec.yaml", "name: app", FrameworkFlutter},
+		{"flutter", "pubspec.yaml", "name: app\nflutter:\n  uses-material-design: true\n", FrameworkFlutter},
+		{"flutter by sdk dependency", "pubspec.yaml", "name: app\ndependencies:\n  flutter:\n    sdk: flutter\n", FrameworkFlutter},
+		{"dart package is not flutter", "pubspec.yaml", "name: app\ndependencies:\n  path: ^1.0.0\n", FrameworkNative},
 		{"expo", "package.json", `{"dependencies":{"expo":"1"}}`, FrameworkExpo},
 		{"react native", "package.json", `{"dependencies":{"react-native":"1"}}`, FrameworkReactNative},
 		{"ionic", "package.json", `{"dependencies":{"@ionic/core":"1"}}`, FrameworkIonic},

@@ -13,18 +13,19 @@ import (
 	"strings"
 
 	"filippo.io/age"
+	"github.com/MobAI-App/ios-builder/internal/projectdetect"
 	"github.com/MobAI-App/ios-builder/internal/registry"
 )
 
 const (
 	FrameworkAuto        = "auto"
-	FrameworkNative      = "native"
-	FrameworkFlutter     = "flutter"
-	FrameworkReactNative = "react-native"
-	FrameworkExpo        = "expo"
-	FrameworkKMP         = "kmp"
-	FrameworkCordova     = "cordova"
-	FrameworkIonic       = "ionic"
+	FrameworkNative      = projectdetect.FrameworkNative
+	FrameworkFlutter     = projectdetect.FrameworkFlutter
+	FrameworkReactNative = projectdetect.FrameworkReactNative
+	FrameworkExpo        = projectdetect.FrameworkExpo
+	FrameworkKMP         = projectdetect.FrameworkKMP
+	FrameworkCordova     = projectdetect.FrameworkCordova
+	FrameworkIonic       = projectdetect.FrameworkIonic
 )
 
 // Operations accepted from workflow_dispatch. Only OperationBuild leaves the
