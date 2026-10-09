@@ -142,7 +142,7 @@ func pickAppID(ids []string) (string, string) {
 		}
 	}
 	for _, id := range ids {
-		if id != shortest && !strings.HasPrefix(id, shortest+".") {
+		if id != shortest && !strings.HasPrefix(id, shortest+".") && !isTestSuffix(strings.TrimPrefix(id, shortest), id, shortest) {
 			return "", fmt.Sprintf("the project has unrelated bundle identifiers (%s and %s); pass --bundle-id", shortest, id)
 		}
 	}
@@ -236,4 +236,10 @@ func nativeScriptBundleID(appDir string) string {
 		}
 	}
 	return ""
+}
+
+// isTestSuffix accepts the test-target naming "<app>Tests" / "<app>UITests",
+// which extends the application's identifier without a dot.
+func isTestSuffix(rest, id, shortest string) bool {
+	return strings.HasPrefix(id, shortest) && (rest == "Tests" || rest == "UITests" || rest == "Test" || rest == "tests")
 }

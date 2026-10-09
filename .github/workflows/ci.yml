@@ -120,7 +120,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        framework: [tauri, nativescript, sparkling]
+        framework: [tauri, nativescript, sparkling, maui]
 
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -135,6 +135,10 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '22'
+
+      - name: Install Tauri iOS prerequisites
+        if: matrix.framework == 'tauri'
+        run: brew install xcodegen libimobiledevice
 
       - name: Build ${{ matrix.framework }} and inspect the IPA
         env:

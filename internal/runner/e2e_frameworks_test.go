@@ -93,3 +93,15 @@ func TestE2EFrameworkSparkling(t *testing.T) {
 	scaffold(t, root, "npm", "create", "sparkling-app@latest", "my-app", "--", "--yes")
 	buildDetected(t, filepath.Join(root, "my-app"), FrameworkSparkling)
 }
+
+// A generated .NET MAUI app on .NET 8, whose iOS workload matches the Xcode the
+// runner images ship by default. (The newest .NET releases pull a workload that
+// needs a newer Xcode than the image has; the pipeline explains that case.)
+func TestE2EFrameworkMAUI(t *testing.T) {
+	requireFrameworkE2E(t, "maui")
+	root := t.TempDir()
+	writeFile(t, root, "global.json", `{"sdk":{"version":"8.0.424","rollForward":"latestFeature"}}`)
+	scaffold(t, root, "dotnet", "new", "install", "Microsoft.Maui.Templates.net8")
+	scaffold(t, root, "dotnet", "new", "maui", "-n", "Generic", "-o", "app", "--framework", "net8.0")
+	buildDetected(t, root, FrameworkMAUI)
+}
