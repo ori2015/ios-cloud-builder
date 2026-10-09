@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -76,3 +77,58 @@ func readProjectFacts(root string, cfg *config.Config, bundleFlag string) (*proj
 
 // describeNotes joins notes for printing, one per line.
 func describeNotes(notes []string) string { return strings.Join(notes, "\n") }
+
+// registrationProblems compares what the project contains today with the
+// registry entry recorded for it, and returns one line per difference. Each line
+// states what the registry has, what the project has and how to fix it.
+func registrationProblems(facts *projectFacts, cfg *config.Config, entry *registry.Project) []string {
+	var problems []string
+	differ := func(field, registered, current string) {
+		if registered != current {
+			problems = append(problems, fmt.Sprintf("registry %s is %q but the project has %q", field, registered, current))
+		}
+	}
+	normalize := func(p string) string {
+		if p == "." {
+			return ""
+		}
+		return p
+	}
+	differ("repository", entry.Owner+"/"+entry.Repo, cfg.GitHub.Owner+"/"+cfg.GitHub.Repo)
+	differ("app_path", normalize(entry.AppPath), facts.AppPath)
+	differ("ios_path", normalize(entry.IOSPath), facts.IOSPath)
+	differ("framework_hint", entry.FrameworkHint, facts.Framework)
+	differ("scheme", entry.Scheme, cfg.IOS.Scheme)
+	differ("snapshot_namespace", entry.SnapshotNamespace, cfg.SnapshotNamespace)
+	configuration := cfg.IOS.Configuration
+	if configuration == "" {
+		configuration = "Debug"
+	}
+	differ("configuration", entry.Configuration, configuration)
+	if entry.BundleID != "" && facts.BundleID != "" {
+		differ("bundle_id", entry.BundleID, facts.BundleID)
+	}
+	return problems
+}
+
+// checkRegistration is the local part of `central doctor`: it re-reads the
+// project and compares it with the local registry backup, so a stale
+// registration is found now instead of when a build fails.
+func checkRegistration(root string, cfg *config.Config, registryPath string) error {
+	facts, err := readProjectFacts(root, cfg, "")
+	if err != nil {
+		return err
+	}
+	value, err := registry.LoadFile(registryPath)
+	if err != nil {
+		return fmt.Errorf("cannot read the local registry backup: %w; run `builder central register`", err)
+	}
+	entry, err := value.Resolve(cfg.ProjectID)
+	if err != nil {
+		return errors.New("this project is not in the local registry backup; run `builder central register`")
+	}
+	if problems := registrationProblems(facts, cfg, &entry); len(problems) > 0 {
+		return fmt.Errorf("%s; run `builder central register` to update it", strings.Join(problems, "; "))
+	}
+	return nil
+}

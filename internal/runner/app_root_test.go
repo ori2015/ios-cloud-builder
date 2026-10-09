@@ -178,3 +178,21 @@ func TestRegistryAppPathValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestMissingContainerErrorSaysWhatWasFoundAndHowToFix(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "README.md", "x")
+	writeFile(t, root, "Gemfile", "x")
+	_, _, err := findXcodeContainer(root)
+	if err == nil {
+		t.Fatal("no container accepted")
+	}
+	for _, want := range []string{"README.md", "Gemfile", "ios.path", "project.yml", "builder central register"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message missing %q: %v", want, err)
+		}
+	}
+	if _, _, err := findXcodeContainer(filepath.Join(root, "absent")); err == nil || !strings.Contains(err.Error(), "empty or unreadable") {
+		t.Errorf("absent folder not described: %v", err)
+	}
+}

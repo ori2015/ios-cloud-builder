@@ -262,7 +262,7 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 	}
 	iosRoot, err = filepath.EvalSymlinks(iosRoot)
 	if err != nil || !pathWithin(sourceRoot, iosRoot) {
-		return fmt.Errorf("iOS path is missing or escapes the private checkout")
+		return fmt.Errorf("the iOS folder %q is missing from the checkout or points outside it; fix ios.path in builder.json (builder central setup --ios-path <folder>) and run `builder central register`", options.IOSPath)
 	}
 
 	if options.RunTests && options.Framework != FrameworkNative && options.Framework != FrameworkKMP {
@@ -484,7 +484,24 @@ func findXcodeContainer(iosRoot string) (workspace, project string, err error) {
 	if len(projects) > 0 {
 		return "", filepath.Base(projects[0]), nil
 	}
-	return "", "", fmt.Errorf("no Xcode workspace or project found")
+	return "", "", fmt.Errorf("no usable Xcode workspace or project in the iOS folder (found: %s); set ios.path in builder.json to the folder holding the .xcodeproj or .xcworkspace, or add a project.yml for XcodeGen, then run `builder central register`", listEntries(iosRoot))
+}
+
+// listEntries names what is in dir, for error messages (names only, capped).
+func listEntries(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
+		return "an empty or unreadable folder"
+	}
+	names := make([]string, 0, 8)
+	for _, entry := range entries {
+		if len(names) == 8 {
+			names = append(names, "...")
+			break
+		}
+		names = append(names, entry.Name())
+	}
+	return strings.Join(names, ", ")
 }
 
 func ensureXcodeContainer(run executor, iosRoot string) (workspace, project string, err error) {

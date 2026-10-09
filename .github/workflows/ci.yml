@@ -41,6 +41,10 @@ jobs:
       - name: Run tests
         run: go test -v -race ./...
 
+      - name: Verify framework detection matrix
+        if: runner.os == 'Linux'
+        run: scripts/verify-matrix.sh
+
       - name: Build
         run: go build -v ./cmd/builder
 
