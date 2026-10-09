@@ -25,6 +25,10 @@ const (
 	FrameworkNativeScript = "nativescript"
 )
 
+// ErrUnsupportedFramework means the project is a recognised engine that this
+// builder does not build. The wrapped message is generic: it names no project data.
+var ErrUnsupportedFramework = errors.New("unsupported framework")
+
 // ErrUnrecognized means nothing in the directory identifies a supported framework
 // or an Xcode project.
 var ErrUnrecognized = errors.New("no supported iOS project recognised")
@@ -96,6 +100,9 @@ func DetectFramework(appRoot string) (string, error) {
 	case cordovaDepRe.Match(pkg) || isCordovaConfig(appRoot):
 		return FrameworkCordova, nil
 	}
+	if engine, reason := UnsupportedEngine(appRoot); engine != "" {
+		return "", fmt.Errorf("%w: %s", ErrUnsupportedFramework, reason)
+	}
 	if hasKMPPlugin(appRoot) {
 		return FrameworkKMP, nil
 	}
@@ -130,4 +137,33 @@ func hasKMPPlugin(root string) bool {
 		return nil
 	})
 	return found
+}
+
+var (
+	mauiTFMRe  = regexp.MustCompile(`net\d+\.\d+-ios`)
+	godotIOSRe = regexp.MustCompile(`(?m)^platform="iOS"`)
+)
+
+// UnsupportedEngine recognises engines whose iOS build is not implemented:
+// .NET MAUI, Godot and Unity. It returns the engine name and a one-sentence
+// reason that says what is missing and what to do instead.
+func UnsupportedEngine(dir string) (engine, reason string) {
+	const exportAdvice = " Export the iOS Xcode project from the engine, commit it, and register that folder with --app-path; it then builds as a native project."
+	if fileExists(filepath.Join(dir, "ProjectSettings", "ProjectVersion.txt")) {
+		return "unity", "Unity is recognised but not built: generating the Xcode project needs the Unity editor and a license on the runner, which this builder does not provide." + exportAdvice
+	}
+	if fileExists(filepath.Join(dir, "project.godot")) {
+		presets, _ := os.ReadFile(filepath.Join(dir, "export_presets.cfg"))
+		if godotIOSRe.Match(presets) {
+			return "godot", "Godot is recognised but not built: exporting needs the Godot editor and export templates on the runner, which are not installed or verified here." + exportAdvice
+		}
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.csproj"))
+	for _, csproj := range matches {
+		data, err := os.ReadFile(csproj)
+		if err == nil && len(data) < 1<<20 && strings.Contains(string(data), "<UseMaui>true</UseMaui>") && mauiTFMRe.Match(data) {
+			return "maui", ".NET MAUI is recognised but not built: `dotnet publish -f net<X>-ios` signs the app and no unsigned MAUI build switch has been verified." + exportAdvice
+		}
+	}
+	return "", ""
 }

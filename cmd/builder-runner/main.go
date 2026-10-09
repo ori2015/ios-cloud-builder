@@ -4,12 +4,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/MobAI-App/ios-builder/internal/projectdetect"
 	"github.com/MobAI-App/ios-builder/internal/runner"
 )
 
@@ -290,6 +292,10 @@ func detect(args []string) error {
 		return fmt.Errorf("invalid framework detection arguments")
 	}
 	framework, err := runner.DetectFrameworkAt(source, appPath, hint)
+	if errors.Is(err, projectdetect.ErrUnsupportedFramework) {
+		// The message is a fixed sentence about the engine; it carries no project data.
+		return err
+	}
 	if err != nil {
 		return fmt.Errorf("framework detection failed")
 	}

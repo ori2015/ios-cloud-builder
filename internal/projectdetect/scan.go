@@ -25,6 +25,8 @@ const (
 	KindXcode    Kind = "xcode"
 	KindXcodeGen Kind = "xcodegen"
 	KindTauri    Kind = "tauri"
+	// KindUnsupported marks engines that are recognised but not built (see UnsupportedEngine).
+	KindUnsupported Kind = "unsupported"
 )
 
 // MaxDepth bounds the repository scan; app roots deeper than this need --app-path.
@@ -111,6 +113,9 @@ func classify(dir string) (Kind, bool) {
 	}
 	if HasNativeScriptConfig(dir) {
 		return KindNode, true
+	}
+	if engine, _ := UnsupportedEngine(dir); engine != "" {
+		return KindUnsupported, true
 	}
 	if pkg, err := os.ReadFile(filepath.Join(dir, "package.json")); err == nil && nodeMarkerRe.Match(pkg) {
 		return KindNode, true
