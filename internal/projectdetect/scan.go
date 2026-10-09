@@ -208,6 +208,9 @@ func Resolve(root, appPath string) (*Layout, error) {
 	}
 	switch len(candidates) {
 	case 0:
+		if fileExists(filepath.Join(root, "Package.swift")) {
+			return nil, fmt.Errorf("%w: found Package.swift but no Xcode project; a Swift package builds libraries, not an installable app, so add an app project (an .xcodeproj, or a project.yml for XcodeGen)", ErrNoApp)
+		}
 		return nil, fmt.Errorf("%w: looked for pubspec.yaml (Flutter), package.json (Expo, React Native, Capacitor, Ionic), config.xml (Cordova), an Xcode project or workspace, or project.yml (XcodeGen) within %d folders; pass --app-path <folder> if your app is deeper", ErrNoApp, MaxDepth)
 	case 1:
 		return layoutFor(root, candidates[0])

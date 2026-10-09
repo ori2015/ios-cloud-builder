@@ -315,6 +315,17 @@ func runCentralDoctor(cmd *cobra.Command, _ []string) error {
 	checks := []check{
 		{"git executable", func(context.Context) error { _, err := exec.LookPath("git"); return err }},
 		{"configuration", func(context.Context) error { return cfg.Validate() }},
+		{"project matches registration", func(context.Context) error {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			registryPath, err := defaultRegistryPath(cfg.Builder.Owner, cfg.Builder.Repo)
+			if err != nil {
+				return err
+			}
+			return checkRegistration(cwd, cfg, registryPath)
+		}},
 		{"local AGE identity", func(context.Context) error {
 			_, err := security.LoadIdentity()
 			if err != nil {
@@ -325,7 +336,7 @@ func runCentralDoctor(cmd *cobra.Command, _ []string) error {
 				return err
 			}
 			if recipient != cfg.Security.Recipient {
-				return errors.New("builder.json recipient does not match the local identity")
+				return fmt.Errorf("builder.json security.recipient is %s but the local identity is %s; set security.recipient to the local value (an old recipient makes builds fail when their output is decrypted)", cfg.Security.Recipient, recipient)
 			}
 			return nil
 		}},
