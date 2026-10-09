@@ -64,6 +64,11 @@ func BundleID(root string, layout *Layout, configuration string) (id, reason str
 			return pickAppID(literal)
 		}
 	}
+	if layout.Kind == KindTauri {
+		if id := tauriBundleID(appDir); id != "" {
+			return validOrReason(id)
+		}
+	}
 	if layout.Kind == KindNode {
 		if id := expoBundleID(appDir); id != "" {
 			return validOrReason(id)
@@ -174,6 +179,28 @@ func capacitorBundleID(appDir string) string {
 		}
 		if json.Unmarshal(data, &cfg) == nil && cfg.AppID != "" {
 			return cfg.AppID
+		}
+	}
+	return ""
+}
+
+var tauriIdentifierRe = regexp.MustCompile(`(?m)^\s*"?identifier"?\s*[:=]\s*["']([^"']+)["']`)
+
+// tauriBundleID reads the Tauri 2 top-level identifier from src-tauri's config.
+func tauriBundleID(appDir string) string {
+	for _, name := range []string{"tauri.conf.json", "tauri.conf.json5", "Tauri.toml"} {
+		data, err := os.ReadFile(filepath.Join(appDir, "src-tauri", name))
+		if err != nil {
+			continue
+		}
+		var cfg struct {
+			Identifier string `json:"identifier"`
+		}
+		if json.Unmarshal(data, &cfg) == nil && cfg.Identifier != "" {
+			return cfg.Identifier
+		}
+		if m := tauriIdentifierRe.FindSubmatch(data); m != nil {
+			return string(m[1])
 		}
 	}
 	return ""

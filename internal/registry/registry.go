@@ -141,7 +141,7 @@ func (p *Project) Validate() error {
 		return errors.New("invalid configuration")
 	}
 	switch p.FrameworkHint {
-	case "auto", "native", "flutter", "react-native", "expo", "kmp", "cordova", "ionic":
+	case "auto", "native", "flutter", "react-native", "expo", "kmp", "cordova", "ionic", "tauri":
 	default:
 		return errors.New("invalid framework hint")
 	}

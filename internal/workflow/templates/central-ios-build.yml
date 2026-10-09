@@ -152,7 +152,7 @@ jobs:
           echo "DEVELOPER_DIR=$app/Contents/Developer" >> "$GITHUB_ENV"
 
       - name: Set up Node.js
-        if: steps.detect.outputs.framework == 'react-native' || steps.detect.outputs.framework == 'expo' || steps.detect.outputs.framework == 'cordova' || steps.detect.outputs.framework == 'ionic'
+        if: steps.detect.outputs.framework == 'react-native' || steps.detect.outputs.framework == 'expo' || steps.detect.outputs.framework == 'cordova' || steps.detect.outputs.framework == 'ionic' || steps.detect.outputs.framework == 'tauri'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: ${{ steps.tools.outputs.node_version || '20' }}

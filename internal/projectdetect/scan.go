@@ -24,6 +24,7 @@ const (
 	KindKMP      Kind = "kmp"
 	KindXcode    Kind = "xcode"
 	KindXcodeGen Kind = "xcodegen"
+	KindTauri    Kind = "tauri"
 )
 
 // MaxDepth bounds the repository scan; app roots deeper than this need --app-path.
@@ -105,6 +106,9 @@ func classify(dir string) (Kind, bool) {
 		IsFlutterPubspec(pubspec) && hasIOSContainerBelow(dir, "ios") {
 		return KindFlutter, true
 	}
+	if HasTauriConfig(dir) {
+		return KindTauri, true
+	}
 	if pkg, err := os.ReadFile(filepath.Join(dir, "package.json")); err == nil && nodeMarkerRe.Match(pkg) {
 		return KindNode, true
 	}
@@ -147,7 +151,7 @@ func foldNested(found []Candidate) []Candidate {
 	for _, c := range found {
 		shadowed := false
 		for _, other := range found {
-			if other.Path == c.Path || (other.Kind != KindFlutter && other.Kind != KindNode && other.Kind != KindKMP) {
+			if other.Path == c.Path || (other.Kind != KindFlutter && other.Kind != KindNode && other.Kind != KindKMP && other.Kind != KindTauri) {
 				continue
 			}
 			if isUnder(other.Path, c.Path) {
