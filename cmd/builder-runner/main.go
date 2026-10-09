@@ -317,7 +317,7 @@ func toolVersions(args []string) error {
 	if err != nil {
 		return fmt.Errorf("tool version detection failed")
 	}
-	fmt.Printf("flutter_version=%s\nnode_version=%s\nxcode_version=%s\n", versions.Flutter, versions.Node, versions.Xcode)
+	fmt.Printf("flutter_version=%s\nnode_version=%s\nxcode_version=%s\ngodot_version=%s\n", versions.Flutter, versions.Node, versions.Xcode, versions.Godot)
 	return nil
 }
 
@@ -357,6 +357,7 @@ func execute(args []string) error {
 	flags.StringVar(&options.SourceRoot, "source", "", "")
 	flags.StringVar(&options.IOSPath, "ios-path", "", "")
 	flags.StringVar(&options.AppPath, "app-path", "", "")
+	flags.StringVar(&options.GodotDir, "godot-dir", "", "")
 	flags.StringVar(&options.Scheme, "scheme", "", "")
 	flags.StringVar(&options.Configuration, "configuration", "", "")
 	flags.StringVar(&options.Framework, "framework", "", "")

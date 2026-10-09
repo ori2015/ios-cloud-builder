@@ -26,6 +26,7 @@ const (
 	FrameworkNativeScript = "nativescript"
 	FrameworkSparkling    = "sparkling" // Lynx app framework with a committed ios/ project
 	FrameworkMAUI         = "maui"      // .NET MAUI
+	FrameworkGodot        = "godot"     // Godot 4 with an iOS export preset
 )
 
 // ErrUnsupportedFramework means the project is a recognised engine that this
@@ -109,6 +110,9 @@ func DetectFramework(appRoot string) (string, error) {
 	if _, _, ok := MAUIProject(appRoot); ok {
 		return FrameworkMAUI, nil
 	}
+	if _, ok := GodotIOSPreset(appRoot); ok {
+		return FrameworkGodot, nil
+	}
 	if engine, reason := UnsupportedEngine(appRoot); engine != "" {
 		return "", fmt.Errorf("%w: %s", ErrUnsupportedFramework, reason)
 	}
@@ -149,23 +153,16 @@ func hasKMPPlugin(root string) bool {
 }
 
 var (
-	mauiTFMRe  = regexp.MustCompile(`net\d+\.\d+-ios`)
-	godotIOSRe = regexp.MustCompile(`(?m)^platform="iOS"`)
+	mauiTFMRe = regexp.MustCompile(`net\d+\.\d+-ios`)
 )
 
 // UnsupportedEngine recognises engines whose iOS build is not implemented:
-// Godot and Unity. It returns the engine name and a one-sentence
+// Unity. It returns the engine name and a one-sentence
 // reason that says what is missing and what to do instead.
 func UnsupportedEngine(dir string) (engine, reason string) {
 	const exportAdvice = " Export the iOS Xcode project from the engine, commit it, and register that folder with --app-path; it then builds as a native project."
 	if fileExists(filepath.Join(dir, "ProjectSettings", "ProjectVersion.txt")) {
 		return "unity", "Unity is recognised but not built: generating the Xcode project needs the Unity editor and a license on the runner, which this builder does not provide." + exportAdvice
-	}
-	if fileExists(filepath.Join(dir, "project.godot")) {
-		presets, _ := os.ReadFile(filepath.Join(dir, "export_presets.cfg"))
-		if godotIOSRe.Match(presets) {
-			return "godot", "Godot is recognised but not built: exporting needs the Godot editor and export templates on the runner, which are not installed or verified here." + exportAdvice
-		}
 	}
 	return "", ""
 }
@@ -186,4 +183,45 @@ func MAUIProject(dir string) (csproj, tfm string, ok bool) {
 		}
 	}
 	return "", "", false
+}
+
+var (
+	godotPresetSectionRe = regexp.MustCompile(`(?m)^\[preset\.(\d+)\]\s*$`)
+	godotFeatureRe       = regexp.MustCompile(`config/features=PackedStringArray\("(\d+\.\d+)"`)
+)
+
+// GodotIOSPreset returns the name of the first iOS export preset in a Godot
+// project at dir, or ok=false when dir is not a Godot project with one.
+func GodotIOSPreset(dir string) (name string, ok bool) {
+	if !fileExists(filepath.Join(dir, "project.godot")) {
+		return "", false
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "export_presets.cfg"))
+	if err != nil || len(data) > 1<<20 {
+		return "", false
+	}
+	for _, section := range SplitINI(string(data)) {
+		if !godotPresetSectionRe.MatchString(section.Header) {
+			continue
+		}
+		if INIValue(section.Body, "platform") == "iOS" {
+			if presetName := INIValue(section.Body, "name"); presetName != "" {
+				return presetName, true
+			}
+		}
+	}
+	return "", false
+}
+
+// GodotMinorVersion reads the engine's major.minor from project.godot
+// (config/features), or "" when it is not stated.
+func GodotMinorVersion(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "project.godot"))
+	if err != nil {
+		return ""
+	}
+	if m := godotFeatureRe.FindSubmatch(data); m != nil {
+		return string(m[1])
+	}
+	return ""
 }

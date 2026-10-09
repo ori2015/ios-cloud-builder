@@ -97,6 +97,9 @@ func layoutFor(root string, c Candidate) (*Layout, error) {
 	switch c.Kind {
 	case KindFlutter:
 		layout.IOSPath = join("ios")
+	case KindGodot:
+		// The Xcode project is exported by the build; nothing is committed.
+		layout.IOSPath, layout.Generated = join("."), true
 	case KindMAUI:
 		// MAUI generates its Xcode project inside the build; there is no iOS folder in git.
 		layout.IOSPath, layout.Generated = join("."), true

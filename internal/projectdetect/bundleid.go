@@ -64,6 +64,18 @@ func BundleID(root string, layout *Layout, configuration string) (id, reason str
 			return pickAppID(literal)
 		}
 	}
+	if layout.Kind == KindGodot {
+		if data, err := os.ReadFile(filepath.Join(appDir, "export_presets.cfg")); err == nil {
+			for _, section := range SplitINI(string(data)) {
+				if strings.HasSuffix(section.Header, ".options]") {
+					if id := INIValue(section.Body, "application/bundle_identifier"); id != "" {
+						return validOrReason(id)
+					}
+				}
+			}
+		}
+		return "", "the Godot iOS preset sets no application/bundle_identifier"
+	}
 	if layout.Kind == KindMAUI {
 		if csproj, _, ok := MAUIProject(appDir); ok {
 			if data, err := os.ReadFile(filepath.Join(appDir, csproj)); err == nil {

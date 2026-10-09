@@ -117,10 +117,13 @@ jobs:
     name: Real build (${{ matrix.framework }})
     runs-on: macos-15
     timeout-minutes: 60
+    env:
+      # the same Xcode the central build job selects
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     strategy:
       fail-fast: false
       matrix:
-        framework: [tauri, nativescript, sparkling, maui]
+        framework: [tauri, nativescript, sparkling, maui, godot]
 
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -140,8 +143,13 @@ jobs:
         if: matrix.framework == 'tauri'
         run: brew install xcodegen libimobiledevice
 
+      - name: Install Godot
+        if: matrix.framework == 'godot'
+        run: scripts/install-godot.sh 4.4 "$RUNNER_TEMP/godot"
+
       - name: Build ${{ matrix.framework }} and inspect the IPA
         env:
           BUILDER_E2E_FRAMEWORKS: ${{ matrix.framework }}
+          GODOT_DIR: ${{ runner.temp }}/godot
         run: go test -v -timeout 50m -run 'TestE2EFramework' ./internal/runner
 

@@ -26,6 +26,7 @@ const (
 	KindXcodeGen Kind = "xcodegen"
 	KindTauri    Kind = "tauri"
 	KindMAUI     Kind = "maui"
+	KindGodot    Kind = "godot"
 	// KindUnsupported marks engines that are recognised but not built (see UnsupportedEngine).
 	KindUnsupported Kind = "unsupported"
 )
@@ -118,6 +119,9 @@ func classify(dir string) (Kind, bool) {
 	if _, _, ok := MAUIProject(dir); ok {
 		return KindMAUI, true
 	}
+	if _, ok := GodotIOSPreset(dir); ok {
+		return KindGodot, true
+	}
 	if engine, _ := UnsupportedEngine(dir); engine != "" {
 		return KindUnsupported, true
 	}
@@ -173,7 +177,7 @@ func foldNested(found []Candidate) []Candidate {
 	for _, c := range found {
 		shadowed := false
 		for _, other := range found {
-			if other.Path == c.Path || (other.Kind != KindFlutter && other.Kind != KindNode && other.Kind != KindKMP && other.Kind != KindTauri && other.Kind != KindMAUI) {
+			if other.Path == c.Path || (other.Kind != KindFlutter && other.Kind != KindNode && other.Kind != KindKMP && other.Kind != KindTauri && other.Kind != KindMAUI && other.Kind != KindGodot) {
 				continue
 			}
 			if isUnder(other.Path, c.Path) {

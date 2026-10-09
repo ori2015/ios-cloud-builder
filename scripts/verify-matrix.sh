@@ -152,8 +152,8 @@ expect two-apps "app_path=b ios_path=b/ios framework=flutter bundle_id=example.g
 put unity ProjectSettings/ProjectVersion.txt "m_EditorVersion: 2022.3.0f1"
 expect_error unity "Unity is recognised"
 put godot project.godot "config_version=5"
-put godot export_presets.cfg $'[preset.0]\nplatform="iOS"'
-expect_error godot "Godot is recognised"
+put godot export_presets.cfg $'[preset.0]\nname="iOS"\nplatform="iOS"\n\n[preset.0.options]\napplication/bundle_identifier="example.generic.godot"'
+expect godot "ios_path= framework=godot bundle_id=example.generic.godot"
 put maui App.csproj '<Project><PropertyGroup><TargetFrameworks>net8.0-ios</TargetFrameworks><UseMaui>true</UseMaui><ApplicationId>example.generic.maui</ApplicationId></PropertyGroup></Project>'
 expect maui "ios_path= framework=maui bundle_id=example.generic.maui"
 

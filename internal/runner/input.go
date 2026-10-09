@@ -30,6 +30,7 @@ const (
 	FrameworkNativeScript = projectdetect.FrameworkNativeScript
 	FrameworkSparkling    = projectdetect.FrameworkSparkling
 	FrameworkMAUI         = projectdetect.FrameworkMAUI
+	FrameworkGodot        = projectdetect.FrameworkGodot
 )
 
 // Operations accepted from workflow_dispatch. Only OperationBuild leaves the
@@ -145,7 +146,7 @@ func validateRelativePath(value string) error {
 func validFramework(framework string) bool {
 	switch framework {
 	case FrameworkAuto, FrameworkNative, FrameworkFlutter, FrameworkReactNative,
-		FrameworkExpo, FrameworkKMP, FrameworkCordova, FrameworkIonic, FrameworkTauri, FrameworkNativeScript, FrameworkSparkling, FrameworkMAUI:
+		FrameworkExpo, FrameworkKMP, FrameworkCordova, FrameworkIonic, FrameworkTauri, FrameworkNativeScript, FrameworkSparkling, FrameworkMAUI, FrameworkGodot:
 		return true
 	default:
 		return false

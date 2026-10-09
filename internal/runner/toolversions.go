@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/MobAI-App/ios-builder/internal/projectdetect"
 )
 
 // ToolVersions are the toolchain versions a project pins in its own files.
@@ -17,11 +19,14 @@ type ToolVersions struct {
 	Flutter string
 	Node    string
 	Xcode   string
+	// Godot is "x.y.z" from .godot-version, else "x.y" from project.godot; the workflow resolves the release.
+	Godot string
 }
 
 var (
 	exactVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 	looseVersionRe = regexp.MustCompile(`^\d+(\.\d+){0,2}$`)
+	godotVersionRe = regexp.MustCompile(`^\d+\.\d+(\.\d+)?$`)
 )
 
 // ToolVersionsAt is ReadToolVersions for an app in the repository-relative
@@ -70,6 +75,9 @@ func ReadToolVersions(sourceRoot, appRoot string) ToolVersions {
 		}
 		if out.Node == "" {
 			out.Node = nodeVersion(dir)
+		}
+		if out.Godot == "" {
+			out.Godot = firstValid(godotVersionRe, strings.TrimSuffix(firstLine(filepath.Join(dir, ".godot-version")), "-stable"), projectdetect.GodotMinorVersion(dir))
 		}
 		if out.Xcode == "" {
 			out.Xcode = firstValid(looseVersionRe, firstLine(filepath.Join(dir, ".xcode-version")))

@@ -95,10 +95,6 @@ func TestUnsupportedEnginesAreNamedNotGuessed(t *testing.T) {
 		{"unity", func(t *testing.T, r string) {
 			write(t, r, "ProjectSettings/ProjectVersion.txt", "m_EditorVersion: 2022.3.0f1")
 		}, "Unity"},
-		{"godot with an ios preset", func(t *testing.T, r string) {
-			write(t, r, "project.godot", "config_version=5")
-			write(t, r, "export_presets.cfg", "[preset.0]\nname=\"iOS\"\nplatform=\"iOS\"\n")
-		}, "Godot"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -160,5 +156,42 @@ func TestMAUIDetection(t *testing.T) {
 	write(t, lib, "Lib.csproj", "<Project><PropertyGroup><TargetFramework>net8.0</TargetFramework><UseMaui>true</UseMaui></PropertyGroup></Project>")
 	if _, _, ok := MAUIProject(lib); ok {
 		t.Fatal("project without an iOS target accepted")
+	}
+}
+
+const godotPresets = "[preset.0]\n\nname=\"Windows Desktop\"\nplatform=\"Windows Desktop\"\n\n[preset.0.options]\n\n" +
+	"[preset.1]\n\nname=\"iOS Release\"\nplatform=\"iOS\"\nrunnable=true\n\n[preset.1.options]\n\napplication/bundle_identifier=\"example.generic.godot\"\napplication/app_store_team_id=\"\"\n"
+
+func TestGodotDetection(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "game/project.godot", "config_version=5\n[application]\nconfig/features=PackedStringArray(\"4.4\", \"Mobile\")\n")
+	write(t, root, "game/export_presets.cfg", godotPresets)
+	got := resolve(t, root, "")
+	if got.Kind != KindGodot || got.AppPath != "game" || !got.Generated {
+		t.Fatalf("layout %+v", *got)
+	}
+	if fw, err := DetectFramework(root + "/game"); err != nil || fw != FrameworkGodot {
+		t.Fatalf("DetectFramework = %q, %v", fw, err)
+	}
+	if id, why := BundleID(root, got, "Debug"); id != "example.generic.godot" {
+		t.Fatalf("bundle id %q (%s)", id, why)
+	}
+	if name, ok := GodotIOSPreset(root + "/game"); !ok || name != "iOS Release" {
+		t.Fatalf("preset %q %v", name, ok)
+	}
+	if v := GodotMinorVersion(root + "/game"); v != "4.4" {
+		t.Fatalf("minor version %q", v)
+	}
+}
+
+func TestGodotWithoutIOSPresetIsNotAnApp(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "project.godot", "config_version=5\n")
+	write(t, root, "export_presets.cfg", "[preset.0]\n\nname=\"Web\"\nplatform=\"Web\"\n")
+	if _, ok := GodotIOSPreset(root); ok {
+		t.Fatal("project without an iOS preset accepted")
+	}
+	if _, err := Resolve(root, ""); !errors.Is(err, ErrNoApp) {
+		t.Fatalf("got %v", err)
 	}
 }

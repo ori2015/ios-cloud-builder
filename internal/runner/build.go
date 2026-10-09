@@ -35,6 +35,10 @@ type BuildOptions struct {
 	// project code is checked out, and enforced below against what the build
 	// actually produced.
 	BundleID string
+	// GodotDir is the absolute folder (outside the checkout) holding the Godot
+	// editor (Godot.app) and its export templates (templates/), installed by the
+	// workflow. Only Godot projects use it.
+	GodotDir string
 	// RunTests runs `xcodebuild test` on an iOS Simulator instead of producing
 	// an IPA. Supported for native Xcode / XcodeGen projects only.
 	RunTests bool
@@ -116,6 +120,9 @@ func (options *BuildOptions) validate() error {
 	}
 	if err := validateRelativePath(options.IOSPath); err != nil {
 		return fmt.Errorf("invalid iOS path")
+	}
+	if options.GodotDir != "" && (!filepath.IsAbs(options.GodotDir) || pathWithin(options.SourceRoot, options.GodotDir)) {
+		return fmt.Errorf("invalid Godot tools folder")
 	}
 	if options.AppPath != "" {
 		if err := validateRelativePath(options.AppPath); err != nil {
@@ -242,6 +249,12 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 		if iosPath := strings.TrimSpace(options.IOSPath); iosPath == "" || iosPath == "." {
 			iosRoot = filepath.Join(appRoot, "ios")
 		}
+	case FrameworkGodot:
+		exported, err := generateGodotXcodeProject(run, appRoot, options.GodotDir, privateHome)
+		if err != nil {
+			return err
+		}
+		iosRoot = exported
 	case FrameworkSparkling:
 		// `sparkling-app-cli build --copy` compiles the Lynx bundles and copies them into
 		// the committed ios/ project; pod install and xcodebuild below build that project.

@@ -44,6 +44,12 @@ func scaffold(t *testing.T, dir string, program string, args ...string) {
 // `central register` does, then builds with exactly those values.
 func buildDetected(t *testing.T, root, wantFramework string) {
 	t.Helper()
+	buildDetectedWith(t, root, wantFramework, nil)
+}
+
+// buildDetectedWith is buildDetected with a hook to set extra build options.
+func buildDetectedWith(t *testing.T, root, wantFramework string, adjust func(*BuildOptions)) {
+	t.Helper()
 	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
 		writeFile(t, root, ".git/config", "[core]\n")
 	}
@@ -65,9 +71,11 @@ func buildDetected(t *testing.T, root, wantFramework string) {
 	if appPath == "." {
 		appPath = ""
 	}
-	info := buildFixture(t, root, &BuildOptions{
-		Framework: framework, AppPath: appPath, IOSPath: iosPath, BundleID: bundleID,
-	})
+	options := &BuildOptions{Framework: framework, AppPath: appPath, IOSPath: iosPath, BundleID: bundleID}
+	if adjust != nil {
+		adjust(options)
+	}
+	info := buildFixture(t, root, options)
 	t.Logf("built %s (%s)", info.AppName, info.BundleID)
 }
 
@@ -104,4 +112,44 @@ func TestE2EFrameworkMAUI(t *testing.T) {
 	scaffold(t, root, "dotnet", "new", "install", "Microsoft.Maui.Templates.net8")
 	scaffold(t, root, "dotnet", "new", "maui", "-n", "Generic", "-o", "app", "--framework", "net8.0")
 	buildDetected(t, root, FrameworkMAUI)
+}
+
+// A hand-written Godot 4 project with an iOS export preset, the way the editor
+// writes it. GODOT_DIR is the folder scripts/install-godot.sh filled.
+func TestE2EFrameworkGodot(t *testing.T) {
+	requireFrameworkE2E(t, "godot")
+	godotDir := os.Getenv("GODOT_DIR")
+	if godotDir == "" {
+		t.Skip("GODOT_DIR is not set")
+	}
+	root := t.TempDir()
+	writeFile(t, root, "game/project.godot", "config_version=5\n\n[application]\n\nconfig/name=\"Generic\"\nrun/main_scene=\"res://main.tscn\"\nconfig/features=PackedStringArray(\"4.4\", \"Mobile\")\nconfig/icon=\"res://icon.svg\"\n")
+	writeFile(t, root, "game/main.tscn", "[gd_scene format=3]\n\n[node name=\"Main\" type=\"Node2D\"]\n")
+	writeFile(t, root, "game/icon.svg", `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128"><rect width="128" height="128" fill="red"/></svg>`)
+	writeFile(t, root, "game/export_presets.cfg", `[preset.0]
+
+name="iOS"
+platform="iOS"
+runnable=true
+advanced_options=false
+dedicated_server=false
+custom_features=""
+export_filter="all_resources"
+include_filter=""
+exclude_filter=""
+export_path=""
+encryption_include_filters=""
+encryption_exclude_filters=""
+encrypt_pck=false
+encrypt_directory=false
+
+[preset.0.options]
+
+application/bundle_identifier="example.generic.godot"
+application/short_version="1.0"
+application/version="1.0"
+application/min_ios_version="14.0"
+`)
+	layoutRoot := filepath.Join(root, "game")
+	buildDetectedWith(t, layoutRoot, FrameworkGodot, func(o *BuildOptions) { o.GodotDir = godotDir })
 }
