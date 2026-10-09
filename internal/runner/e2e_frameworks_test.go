@@ -162,10 +162,13 @@ func TestE2EFrameworkFlutter(t *testing.T) {
 }
 
 // A managed Expo app has no ios/ folder; the pipeline runs expo prebuild.
+// The SDK is pinned: the newest SDK's expo-modules-jsi failed to compile with
+// the Xcode (26.3) the central build job selects, a toolchain incompatibility
+// rather than a pipeline fault.
 func TestE2EFrameworkExpo(t *testing.T) {
 	requireFrameworkE2E(t, "expo")
 	root := t.TempDir()
-	scaffold(t, root, "npx", "--yes", "create-expo-app@latest", "app", "--template", "blank", "--no-install", "--yes")
+	scaffold(t, root, "npx", "--yes", "create-expo-app@latest", "app", "--template", "blank@sdk-54", "--no-install", "--yes")
 	appJSON := filepath.Join(root, "app", "app.json")
 	data, err := os.ReadFile(appJSON)
 	if err != nil {
