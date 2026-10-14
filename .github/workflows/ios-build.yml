@@ -32,10 +32,10 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
     steps:
       - name: Checkout trusted public builder
@@ -360,10 +360,10 @@ jobs:
     if: inputs.operation == 'adhoc'
     needs: trusted-package
     environment: apple-production
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       BUILD_ID: ${{ inputs.build_id }}
       PROJECT_ID: ${{ inputs.project_id }}
 
@@ -483,10 +483,10 @@ jobs:
     if: inputs.operation == 'testflight'
     needs: trusted-package
     environment: apple-production
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       BUILD_ID: ${{ inputs.build_id }}
       PROJECT_ID: ${{ inputs.project_id }}
 
