@@ -175,3 +175,14 @@ func TestMaestroDriverStartupFailureIsRecognised(t *testing.T) {
 		t.Fatal("a failed step must not be retried")
 	}
 }
+
+func TestSimulatorTipsIncludeQuickPathIntroduction(t *testing.T) {
+	// Regression: the "Speed up your typing by sliding your finger" sheet covered an Amiram screenshot.
+	found := false
+	for _, key := range simulatorTipsShown {
+		found = found || key == "DidShowContinuousPathIntroduction"
+	}
+	if !found {
+		t.Fatal("the QuickPath introduction is not suppressed")
+	}
+}
