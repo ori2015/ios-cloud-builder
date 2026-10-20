@@ -351,6 +351,7 @@ func captureScreenshots(run executor, sourceRoot, appPath, entitlements, flow, o
 	if flowErr != nil {
 		bundleID, _, _ := readAppMetadata(filepath.Join(appPath, "Info.plist"))
 		appendSimulatorAppLog(run, dir, sim.UDID, filepath.Base(strings.TrimSuffix(appPath, ".app")), bundleID)
+		appendConsoleLaunch(run, dir, sim.UDID, bundleID)
 		// A failed required step fails the run. What was captured, plus Maestro's own failure
 		// screenshots (prefixed debug_), still travels encrypted so the caller can see where it stopped.
 		images = append(images, collectMaestroFailureScreenshots(shots)...)
@@ -455,12 +456,13 @@ func appendCrashReports(log io.Writer, dir, executable string, since time.Time) 
 func simulatorAppLogPredicate(executable, bundleID string) string {
 	exe := strings.ReplaceAll(executable, `"`, ``)
 	id := strings.ReplaceAll(bundleID, `"`, ``)
-	predicate := fmt.Sprintf(`process == %[1]q OR eventMessage CONTAINS %[1]q`, exe)
+	// XCTest's icon-hierarchy chatter mentions the app hundreds of times a second and buries the launch.
+	predicate := fmt.Sprintf(`(process == %[1]q OR eventMessage CONTAINS %[1]q`, exe)
 	if id != "" {
 		// Launch refusals (launchd, dyld, code signing) name the bundle, not the process.
 		predicate += fmt.Sprintf(` OR eventMessage CONTAINS[c] %q`, id)
 	}
-	return predicate
+	return predicate + `) AND NOT (subsystem == "com.apple.dt.xctest") AND NOT (eventMessage CONTAINS "PlugInKit") AND NOT (category == "Library")`
 }
 
 // appendSimulatorAppLog adds the last minutes of the simulator log for the app to the private log.
@@ -480,4 +482,26 @@ func appendSimulatorAppLog(run executor, dir, udid, executable, bundleID string)
 		lines = lines[len(lines)-400:]
 	}
 	fmt.Fprintf(run.log, "\n--- simulator log for %s (last %d lines) ---\n%s\n", executable, len(lines), strings.Join(lines, "\n"))
+}
+
+// consoleLaunchWindow is how long a diagnostic launch's stdout and stderr are recorded.
+const consoleLaunchWindow = 15 * time.Second
+
+// appendConsoleLaunch launches the app once more with its console attached and records what it
+// prints in the first seconds: a Swift fatal error, a dyld failure or an uncaught exception shows
+// here even when the app dies before writing a crash report.
+func appendConsoleLaunch(run executor, dir, udid, bundleID string) {
+	if bundleID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(run.ctx, consoleLaunchWindow)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "xcrun", "simctl", "launch", "--console-pty", "--terminate-running-process", udid, bundleID)
+	cmd.Dir = dir
+	cmd.Env = run.env
+	out, err := cmd.CombinedOutput()
+	if len(out) > 32<<10 {
+		out = out[len(out)-32<<10:]
+	}
+	fmt.Fprintf(run.log, "\n--- console of a diagnostic launch of %s (%s, %v) ---\n%s\n", bundleID, consoleLaunchWindow, err, out)
 }

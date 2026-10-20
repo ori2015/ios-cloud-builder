@@ -189,7 +189,8 @@ func TestSimulatorTipsIncludeQuickPathIntroduction(t *testing.T) {
 
 func TestSimulatorAppLogPredicateNamesTheApp(t *testing.T) {
 	got := simulatorAppLogPredicate(`Flow"Sip`, "com.drinkordry.app")
-	if !strings.Contains(got, `process == "FlowSip"`) || !strings.Contains(got, `CONTAINS[c] "com.drinkordry.app"`) || strings.Contains(got, `Flow"Sip`) {
+	if !strings.Contains(got, `process == "FlowSip"`) || !strings.Contains(got, `CONTAINS[c] "com.drinkordry.app"`) || strings.Contains(got, `Flow"Sip`) ||
+		!strings.Contains(got, `NOT (subsystem == "com.apple.dt.xctest")`) {
 		t.Fatalf("got %s", got)
 	}
 }
