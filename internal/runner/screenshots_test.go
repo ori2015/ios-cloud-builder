@@ -3,7 +3,9 @@ package runner
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestPickScreenshotSimulatorPrefersNewestProMax(t *testing.T) {
@@ -131,5 +133,36 @@ func TestCollectMaestroFailureScreenshotsKeepsNewestThree(t *testing.T) {
 	got := collectMaestroFailureScreenshots(shots)
 	if len(got) != 3 || filepath.Base(got[0]) != "screenshot-2.png" || filepath.Base(got[2]) != "screenshot-4.png" {
 		t.Fatalf("got %v", got)
+	}
+}
+
+func TestResolvedSimulatorEntitlementsFillsSigningVariables(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "App.entitlements")
+	_ = os.WriteFile(source, []byte(`<plist><dict><key>keychain-access-groups</key><array><string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string></array><key>com.apple.developer.icloud-container-identifiers</key><array><string>iCloud.com.example.app</string></array></dict></plist>`), 0600)
+	out, err := resolvedSimulatorEntitlements(source, "com.example.app", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(out)
+	if !strings.Contains(string(data), "<string>com.example.app</string>") || strings.Contains(string(data), "$(") ||
+		!strings.Contains(string(data), "iCloud.com.example.app") {
+		t.Fatalf("got %s", data)
+	}
+}
+
+func TestAppendCrashReportsShowsOnlyThisAppsNewReports(t *testing.T) {
+	dir := t.TempDir()
+	since := time.Now().Add(-time.Minute)
+	_ = os.WriteFile(filepath.Join(dir, "FlowSip-2026-10-20-120000.ips"), []byte("Exception Type: EXC_CRASH\nline2"), 0600)
+	_ = os.WriteFile(filepath.Join(dir, "Other-2026-10-20-120000.ips"), []byte("other app"), 0600)
+	old := filepath.Join(dir, "FlowSip-2026-10-19-120000.ips")
+	_ = os.WriteFile(old, []byte("old crash"), 0600)
+	_ = os.Chtimes(old, since.Add(-time.Hour), since.Add(-time.Hour))
+	var log strings.Builder
+	appendCrashReports(&log, dir, "FlowSip", since)
+	got := log.String()
+	if !strings.Contains(got, "EXC_CRASH") || strings.Contains(got, "other app") || strings.Contains(got, "old crash") {
+		t.Fatalf("got %q", got)
 	}
 }

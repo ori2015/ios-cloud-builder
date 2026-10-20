@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -168,6 +169,60 @@ func buildForSimulator(run executor, options *BuildOptions, appRoot, iosRoot, wo
 		}
 		return findApp(filepath.Join(appRoot, "build", "ios", "iphonesimulator"))
 	}
+	return buildXcodeForSimulator(run, options, iosRoot, workspace, project, scheme, derivedData)
+}
+
+// simulatorEntitlements returns the project's entitlements file for the app target, read from
+// the simulator build settings and required to lie inside the checkout ("" when there is none).
+// The unsigned simulator build carries no entitlements, so CloudKit, HealthKit, App Groups and
+// keychain groups would be missing at run time and such apps can exit on launch.
+func simulatorEntitlements(run executor, iosRoot, sourceRoot, workspace, project, scheme, configuration string) string {
+	if workspace == "" && project == "" {
+		var err error
+		if workspace, project, err = findXcodeContainer(iosRoot); err != nil {
+			return ""
+		}
+	}
+	if scheme == "" {
+		scheme = "Runner"
+	}
+	args := []string{}
+	if workspace != "" {
+		args = append(args, "-workspace", workspace)
+	} else {
+		args = append(args, "-project", project)
+	}
+	args = append(args, "-scheme", scheme, "-configuration", configuration, "-sdk", "iphonesimulator", "-showBuildSettings")
+	output, err := run.capture(iosRoot, "xcodebuild", args...)
+	if err != nil {
+		return ""
+	}
+	path, ok := entitlementsFileFromBuildSettings(output, sourceRoot)
+	if !ok {
+		return ""
+	}
+	return path
+}
+
+// resolvedSimulatorEntitlements writes a copy of the entitlements with the signing variables
+// a local ad hoc simulator signature has no value for replaced (team prefix empty).
+func resolvedSimulatorEntitlements(source, bundleID, dir string) (string, error) {
+	data, err := readBoundedRegularFile(source, maxEntitlementsRequestBytes)
+	if err != nil {
+		return "", err
+	}
+	text := strings.NewReplacer(
+		"$(AppIdentifierPrefix)", "", "$(TeamIdentifierPrefix)", "",
+		"$(PRODUCT_BUNDLE_IDENTIFIER)", bundleID, "${PRODUCT_BUNDLE_IDENTIFIER}", bundleID,
+	).Replace(string(data))
+	path := filepath.Join(dir, "simulator.entitlements")
+	if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func buildXcodeForSimulator(run executor, options *BuildOptions, iosRoot, workspace, project, scheme, derivedData string) (string, error) {
 	args := []string{}
 	if workspace != "" {
 		args = append(args, "-workspace", workspace)
@@ -193,7 +248,7 @@ func buildForSimulator(run executor, options *BuildOptions, appRoot, iosRoot, wo
 
 // captureScreenshots installs the simulator app, runs the Maestro flow and packs the PNGs
 // it produced into a zip at outputPath (the encrypted "IPA" slot of the artifact).
-func captureScreenshots(run executor, sourceRoot, appPath, flow, outputPath string) error {
+func captureScreenshots(run executor, sourceRoot, appPath, entitlements, flow, outputPath string) error {
 	media, err := screenshotMedia(sourceRoot, flow)
 	if err != nil {
 		return err
@@ -218,6 +273,15 @@ func captureScreenshots(run executor, sourceRoot, appPath, flow, outputPath stri
 		"--cellularMode", "active", "--cellularBars", "4", "--batteryState", "charged", "--batteryLevel", "100")
 	// Apple silicon simulators need at least an ad hoc signature; the build ran without signing.
 	_ = run.run(dir, "/usr/bin/codesign", "--force", "--deep", "--sign", "-", appPath)
+	if entitlements != "" {
+		bundleID, _, _ := readAppMetadata(filepath.Join(appPath, "Info.plist"))
+		if resolved, err := resolvedSimulatorEntitlements(entitlements, bundleID, filepath.Dir(outputPath)); err == nil {
+			// Re-sign the app itself (frameworks keep the signature above) with its entitlements.
+			_ = run.run(dir, "/usr/bin/codesign", "--force", "--sign", "-", "--entitlements", resolved, appPath)
+			defer func() { _ = os.Remove(resolved) }()
+		}
+	}
+	started := time.Now()
 	if err := run.run(dir, "xcrun", "simctl", "install", sim.UDID, appPath); err != nil {
 		return err
 	}
@@ -241,6 +305,10 @@ func captureScreenshots(run executor, sourceRoot, appPath, flow, outputPath stri
 	stopFaceID := approveFaceIDWhileRunning(run, dir, sim.UDID)
 	flowErr := maestro.run(shots, "maestro", "--no-ansi", "--device", sim.UDID, "test", "--test-output-dir", output, flow)
 	stopFaceID()
+	if home, err := os.UserHomeDir(); err == nil {
+		appendCrashReports(run.log, filepath.Join(home, "Library", "Logs", "DiagnosticReports"),
+			filepath.Base(strings.TrimSuffix(appPath, ".app")), started)
+	}
 	images := collectFlowScreenshots(shots)
 	if len(images) == 0 && flowErr == nil {
 		return fmt.Errorf("the screenshot flow took no screenshots (use takeScreenshot)")
@@ -319,4 +387,31 @@ func collectFlowScreenshots(shots string) []string {
 	})
 	sort.Strings(images)
 	return images
+}
+
+// appendCrashReports copies the head of any crash report the simulator wrote for the app
+// during the flow into the private (encrypted) log, so a launch crash is diagnosable.
+func appendCrashReports(log io.Writer, dir, executable string, since time.Time) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	shown := 0
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() || info.ModTime().Before(since) ||
+			!strings.HasPrefix(entry.Name(), executable) || shown == 3 {
+			continue
+		}
+		data, err := readBoundedRegularFile(filepath.Join(dir, entry.Name()), 2<<20)
+		if err != nil {
+			continue
+		}
+		lines := strings.SplitN(string(data), "\n", 121)
+		if len(lines) > 120 {
+			lines = lines[:120]
+		}
+		fmt.Fprintf(log, "\n--- crash report %s (first %d lines) ---\n%s\n", entry.Name(), len(lines), strings.Join(lines, "\n"))
+		shown++
+	}
 }
