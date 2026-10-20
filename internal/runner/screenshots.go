@@ -485,7 +485,9 @@ func simulatorAppLogPredicate(executable, bundleID string) string {
 		// Launch refusals (launchd, dyld, code signing) name the bundle, not the process.
 		predicate += fmt.Sprintf(` OR eventMessage CONTAINS[c] %q`, id)
 	}
-	return predicate + `) AND NOT (subsystem == "com.apple.dt.xctest") AND NOT (eventMessage CONTAINS "PlugInKit") AND NOT (category == "Library")`
+	// Maestro's own driver names the app in every hierarchy poll; it is not the app.
+	return predicate + `) AND NOT (subsystem == "com.apple.dt.xctest") AND NOT (eventMessage CONTAINS "PlugInKit") AND NOT (category == "Library")` +
+		` AND NOT (process BEGINSWITH "maestro-driver")`
 }
 
 // appendSimulatorAppLog adds the last minutes of the simulator log for the app to the private log.
