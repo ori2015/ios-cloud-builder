@@ -249,6 +249,23 @@ func resolvedSimulatorEntitlements(source, bundleID, dir string) (string, error)
 }
 
 func buildXcodeForSimulator(run executor, options *BuildOptions, iosRoot, workspace, project, scheme, derivedData string) (string, error) {
+	// "Sign to Run Locally" first: only a signing build makes Xcode embed each target's entitlements
+	// in the simulator binary (the __entitlements section the simulator reads). Unsigned, an app that
+	// uses CloudKit traps on launch ("your process must have a com.apple.developer.icloud-services
+	// entitlement"). Projects that cannot sign locally fall back to the unsigned build.
+	if err := run.run(iosRoot, "xcodebuild", simulatorBuildArgs(workspace, project, scheme, options.Configuration, derivedData, true)...); err != nil {
+		fmt.Fprintln(run.log, "\nSign-to-run-locally simulator build failed; building unsigned (entitlements will be missing).")
+		_ = os.RemoveAll(derivedData)
+		if err := run.run(iosRoot, "xcodebuild", simulatorBuildArgs(workspace, project, scheme, options.Configuration, derivedData, false)...); err != nil {
+			return "", err
+		}
+	}
+	return findApp(filepath.Join(derivedData, "Build", "Products", options.Configuration+"-iphonesimulator"))
+}
+
+// simulatorBuildArgs is the xcodebuild command for a simulator build. signLocally uses an ad hoc
+// identity with no team or profile, which the simulator accepts and which embeds entitlements.
+func simulatorBuildArgs(workspace, project, scheme, configuration, derivedData string, signLocally bool) []string {
 	args := []string{}
 	if workspace != "" {
 		args = append(args, "-workspace", workspace)
@@ -257,19 +274,24 @@ func buildXcodeForSimulator(run executor, options *BuildOptions, iosRoot, worksp
 	}
 	args = append(args,
 		"-scheme", scheme,
-		"-configuration", options.Configuration,
+		"-configuration", configuration,
 		"-sdk", "iphonesimulator",
 		"-destination", "generic/platform=iOS Simulator",
 		"-derivedDataPath", derivedData,
-		"CODE_SIGNING_ALLOWED=NO",
-		"CODE_SIGNING_REQUIRED=NO",
-		"COMPILER_INDEX_STORE_ENABLE=NO",
-		"build",
 	)
-	if err := run.run(iosRoot, "xcodebuild", args...); err != nil {
-		return "", err
+	if signLocally {
+		args = append(args,
+			"CODE_SIGN_IDENTITY=-",
+			"CODE_SIGN_STYLE=Manual",
+			"DEVELOPMENT_TEAM=",
+			"PROVISIONING_PROFILE_SPECIFIER=",
+			"PROVISIONING_PROFILE=",
+			"CODE_SIGNING_REQUIRED=NO",
+		)
+	} else {
+		args = append(args, "CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO")
 	}
-	return findApp(filepath.Join(derivedData, "Build", "Products", options.Configuration+"-iphonesimulator"))
+	return append(args, "COMPILER_INDEX_STORE_ENABLE=NO", "build")
 }
 
 // captureScreenshots installs the simulator app, runs the Maestro flow and packs the PNGs
