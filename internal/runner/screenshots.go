@@ -141,6 +141,8 @@ func captureScreenshots(run executor, appPath, flow, outputPath string) error {
 	_ = run.run(dir, "xcrun", "simctl", "status_bar", sim.UDID, "override",
 		"--time", "9:41", "--dataNetwork", "wifi", "--wifiMode", "active", "--wifiBars", "3",
 		"--cellularMode", "active", "--cellularBars", "4", "--batteryState", "charged", "--batteryLevel", "100")
+	// Apple silicon simulators need at least an ad hoc signature; the build ran without signing.
+	_ = run.run(dir, "/usr/bin/codesign", "--force", "--deep", "--sign", "-", appPath)
 	if err := run.run(dir, "xcrun", "simctl", "install", sim.UDID, appPath); err != nil {
 		return err
 	}
