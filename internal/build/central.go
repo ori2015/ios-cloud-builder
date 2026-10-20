@@ -172,6 +172,14 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 	}
 
 	if run.Conclusion != "success" {
+		if opts.Screenshots && len(contents.ipa) > 0 {
+			// A failed screenshot flow still returns what it captured, for diagnosis only.
+			if archive, err := decryptBounded(identity, contents.ipa, maxIPACiphertextSize); err == nil {
+				if paths, err := saveScreenshots(archive, filepath.Join(opts.OutputDir, "screenshots-failed")); err == nil {
+					result.ScreenshotPaths = paths
+				}
+			}
+		}
 		logPath, logErr := decryptLogToFile(identity, contents.log, opts.OutputDir, buildID)
 		if logErr != nil {
 			c.progress.Error(PhaseBuilding, logErr)
