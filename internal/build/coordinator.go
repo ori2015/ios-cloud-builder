@@ -95,22 +95,27 @@ func selectExecutionBackend(coordinator *Coordinator) Backend {
 type BuildOptions struct {
 	OutputDir  string
 	Timeout    time.Duration
-	Unsigned   bool   // Skip code signing even if configured
-	TestFlight bool   // Sign and upload through the protected central environment
-	AdHoc      bool   // Sign for ad hoc installation and return the signed IPA
-	RunTests   bool   // Run unit tests on a simulator (central backend): unsigned, no IPA, log only
-	Remote     string // Git remote to push the working-tree snapshot to
+	Unsigned   bool // Skip code signing even if configured
+	TestFlight bool // Sign and upload through the protected central environment
+	AdHoc      bool // Sign for ad hoc installation and return the signed IPA
+	RunTests   bool // Run unit tests on a simulator (central backend): unsigned, no IPA, log only
+	// Screenshots runs the project's Maestro flow on an iPhone simulator (central backend)
+	// and saves the decrypted PNGs to OutputDir/screenshots.
+	Screenshots bool
+	Remote      string // Git remote to push the working-tree snapshot to
 }
 
 // BuildResult contains the result of a build
 type BuildResult struct {
-	BuildID     string
-	IPAPath     string
-	LogPath     string
-	Duration    time.Duration
-	WorkflowURL string
-	IPASize     int64
-	TestFlight  bool
+	BuildID string
+	IPAPath string
+	LogPath string
+	// ScreenshotPaths lists the PNGs saved by a screenshots run.
+	ScreenshotPaths []string
+	Duration        time.Duration
+	WorkflowURL     string
+	IPASize         int64
+	TestFlight      bool
 }
 
 // Build triggers a remote build and downloads the IPA artifact

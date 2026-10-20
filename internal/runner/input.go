@@ -40,6 +40,9 @@ const (
 	// OperationTest builds for the iOS Simulator and runs the project's unit tests.
 	// It is unsigned, produces no IPA and returns only the encrypted log.
 	OperationTest = "test"
+	// OperationScreenshots builds for the iOS Simulator and runs the project's
+	// Maestro screenshot flow. It is unsigned and returns the PNGs encrypted.
+	OperationScreenshots = "screenshots"
 )
 
 var (
@@ -68,7 +71,7 @@ func (in *Inputs) Validate() error {
 	if err != nil || recipient.String() != in.ArtifactRecipient {
 		return fmt.Errorf("invalid artifact_recipient")
 	}
-	if in.Operation != OperationBuild && in.Operation != OperationTest && in.Operation != OperationTestFlight && in.Operation != OperationAdHoc {
+	if in.Operation != OperationBuild && in.Operation != OperationTest && in.Operation != OperationScreenshots && in.Operation != OperationTestFlight && in.Operation != OperationAdHoc {
 		return fmt.Errorf("invalid operation")
 	}
 	return nil
@@ -104,7 +107,7 @@ func ResolveProject(in *Inputs, registryJSON, outputPath string, commands io.Wri
 	defer output.Close()
 	configuration := project.Configuration
 	signed := in.Operation == OperationTestFlight || in.Operation == OperationAdHoc
-	if signed {
+	if signed || in.Operation == OperationScreenshots {
 		configuration = "Release"
 	}
 	// Refuse to sign a project whose application identity is not pinned. The

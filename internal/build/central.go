@@ -188,6 +188,8 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 			kind = "ad hoc signing"
 		case opts.RunTests:
 			kind = "simulator tests"
+		case opts.Screenshots:
+			kind = "simulator screenshots"
 		}
 		return result, fmt.Errorf("%s failed with conclusion %s; decrypted diagnostics: %s", kind, run.Conclusion, logPath)
 	}
@@ -215,6 +217,24 @@ func (c *Coordinator) buildCentral(parent context.Context, opts BuildOptions) (*
 	}
 	if len(contents.ipa) == 0 {
 		return result, errors.New("successful central artifact is missing App.ipa.age")
+	}
+	if opts.Screenshots {
+		archive, err := decryptBounded(identity, contents.ipa, maxIPACiphertextSize)
+		if err != nil {
+			return result, fmt.Errorf("decrypt screenshots: %w", err)
+		}
+		paths, err := saveScreenshots(archive, filepath.Join(opts.OutputDir, "screenshots"))
+		if err != nil {
+			return result, err
+		}
+		if logPath, logErr := decryptLogToFile(identity, contents.log, opts.OutputDir, buildID); logErr == nil {
+			result.LogPath = logPath
+		}
+		result.ScreenshotPaths = paths
+		result.Duration = time.Since(started)
+		c.progress.Complete(PhaseBuilding, fmt.Sprintf("%d simulator screenshots captured", len(paths)))
+		c.progress.Finish()
+		return result, nil
 	}
 	plaintextIPA, err := decryptBounded(identity, contents.ipa, maxIPACiphertextSize)
 	if err != nil {
@@ -303,6 +323,9 @@ func centralDispatchInputsFor(cfg *config.Config, buildID string, opts BuildOpti
 	inputs := centralDispatchInputs(cfg, buildID, opts.TestFlight, opts.AdHoc)
 	if opts.RunTests && !opts.TestFlight && !opts.AdHoc {
 		inputs["operation"] = "test"
+	}
+	if opts.Screenshots && !opts.TestFlight && !opts.AdHoc && !opts.RunTests {
+		inputs["operation"] = "screenshots"
 	}
 	return inputs
 }

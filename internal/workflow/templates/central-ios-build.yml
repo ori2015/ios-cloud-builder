@@ -24,6 +24,7 @@ on:
         options:
           - build
           - test
+          - screenshots
           - testflight
           - adhoc
 
@@ -172,6 +173,25 @@ jobs:
           flutter-version: ${{ steps.tools.outputs.flutter_version }}
           cache: false
 
+      - name: Set up Java for Maestro screenshots
+        if: inputs.operation == 'screenshots'
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install pinned Maestro for screenshots
+        if: inputs.operation == 'screenshots'
+        env:
+          MAESTRO_VERSION: '2.11.0'
+          MAESTRO_SHA256: 5384593cb4e7a106489e75a821d157dd43f4e438df6bc308b72e82c685e1283a
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/maestro.zip" "https://github.com/mobile-dev-inc/Maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip"
+          echo "${MAESTRO_SHA256}  $RUNNER_TEMP/maestro.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP/maestro-cli"
+          rm "$RUNNER_TEMP/maestro.zip"
+          echo "$RUNNER_TEMP/maestro-cli/maestro/bin" >> "$GITHUB_PATH"
+
       - name: Build unsigned IPA and encrypt private outputs
         id: secure-build
         continue-on-error: true
@@ -191,6 +211,7 @@ jobs:
           intermediate=()
           if [ "$OPERATION" = "testflight" ] || [ "$OPERATION" = "adhoc" ]; then intermediate=(--project-intermediate); fi
           if [ "$OPERATION" = "test" ]; then intermediate=(--run-tests); fi
+          if [ "$OPERATION" = "screenshots" ]; then intermediate=(--screenshots); fi
           "$RUNNER_TEMP/builder-runner" execute \
             --source "$GITHUB_WORKSPACE/source" \
             --app-path "$APP_PATH" \
