@@ -37,6 +37,10 @@ func TestBundleID(t *testing.T) {
 			write(t, r, "App.xcodeproj/project.pbxproj", pbxproj(
 				[2]string{"Debug", "example.generic.app.dev"}, [2]string{"Release", "example.generic.app"}))
 		}, KindXcode, ".", ".", "Debug", "example.generic.app.dev", ""},
+		{"test targets named without a dot", func(t *testing.T, r string) {
+			write(t, r, "ios/App.xcodeproj/project.pbxproj", pbxproj(
+				[2]string{"Debug", "com.my.app"}, [2]string{"Debug", "com.my.appTests"}, [2]string{"Debug", "com.my.appUITests"}))
+		}, KindNode, ".", "ios", "Debug", "com.my.app", ""},
 		{"quoted identifier", func(t *testing.T, r string) {
 			write(t, r, "App.xcodeproj/project.pbxproj", pbxproj([2]string{"Debug", `"example.generic.q"`}))
 		}, KindXcode, ".", ".", "Debug", "example.generic.q", ""},

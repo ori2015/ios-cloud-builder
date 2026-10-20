@@ -109,3 +109,56 @@ jobs:
         with:
           name: binaries
           path: dist/
+
+  # Real builds: scaffold a project with each framework's own generator and run
+  # the unsigned pipeline on it. Slow and network-dependent, so separate from the
+  # unit-test matrix; each leg is independent.
+  e2e-frameworks:
+    name: Real build (${{ matrix.framework }})
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      # the same Xcode the central build job selects
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [tauri, nativescript, sparkling, maui, godot, flutter, expo, react-native, capacitor, cordova]
+
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.24'
+          cache: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '22'
+
+      - name: Install Tauri iOS prerequisites
+        if: matrix.framework == 'tauri'
+        run: brew install xcodegen libimobiledevice
+
+      - name: Set up Flutter
+        if: matrix.framework == 'flutter'
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          channel: stable
+          cache: false
+
+      - name: Install Godot
+        if: matrix.framework == 'godot'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/install-godot.sh 4.4 "$RUNNER_TEMP/godot"
+
+      - name: Build ${{ matrix.framework }} and inspect the IPA
+        env:
+          BUILDER_E2E_FRAMEWORKS: ${{ matrix.framework }}
+          GODOT_DIR: ${{ runner.temp }}/godot
+        run: go test -v -timeout 50m -run 'TestE2EFramework' ./internal/runner
+

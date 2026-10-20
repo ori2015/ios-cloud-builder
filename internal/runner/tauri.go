@@ -84,7 +84,7 @@ func finishPrebuiltIPA(source string, options *BuildOptions) error {
 		return fmt.Errorf("the built IPA is not valid: %w", err)
 	}
 	if options.BundleID != "" && info.BundleID != options.BundleID {
-		return fmt.Errorf("built application identity does not match the registered project")
+		return fmt.Errorf("built application identity %q does not match the registered project's %q (the log is private); fix the bundle identifier in the project or register again", info.BundleID, options.BundleID)
 	}
 	if err := os.MkdirAll(filepath.Dir(options.IPAPath), 0o700); err != nil {
 		return fmt.Errorf("prepare IPA output")
