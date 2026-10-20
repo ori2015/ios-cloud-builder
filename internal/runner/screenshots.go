@@ -31,6 +31,9 @@ const (
 	maestroDriverStartupTimeoutMs = "300000"
 )
 
+// simulatorTipsShown are com.apple.Preferences keys for keyboard introductions iOS shows once.
+var simulatorTipsShown = []string{"DidShowContinuousPathIntroduction", "DidShowGestureKeyboardIntroduction"}
+
 // isMaestroDriverStartupFailure reports whether Maestro failed before running any step
 // because its iOS driver did not start; that is safe and worth one retry.
 func isMaestroDriverStartupFailure(output []byte) bool {
@@ -288,6 +291,11 @@ func captureScreenshots(run executor, sourceRoot, appPath, entitlements, flow, o
 	_ = run.run(dir, "xcrun", "simctl", "boot", sim.UDID)
 	if err := run.run(dir, "xcrun", "simctl", "bootstatus", sim.UDID, "-b"); err != nil {
 		return err
+	}
+	// One-time system tips (the QuickPath "slide to type" sheet) would cover the app in a screenshot;
+	// mark them as already shown on this throwaway simulator.
+	for _, key := range simulatorTipsShown {
+		_ = run.run(dir, "xcrun", "simctl", "spawn", sim.UDID, "defaults", "write", "com.apple.Preferences", key, "-bool", "true")
 	}
 	// Apple's marketing status bar: 9:41, full battery and signal.
 	_ = run.run(dir, "xcrun", "simctl", "status_bar", sim.UDID, "override",
