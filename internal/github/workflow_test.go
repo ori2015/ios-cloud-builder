@@ -324,3 +324,40 @@ func TestDeleteRunArtifactsByNameDeletesOnlyExactMatches(t *testing.T) {
 		t.Fatalf("deleted = %#v, want %#v", deleted, want)
 	}
 }
+
+func TestPollForWorkflowCompletionSurvivesTransientErrors(t *testing.T) {
+	// Regression: a single 502 from GitHub ended a screenshot build that was still running.
+	old := workflowPollInterval
+	workflowPollInterval = time.Millisecond
+	defer func() { workflowPollInterval = old }()
+	calls := 0
+	client, closeServer := workflowTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls <= 2 {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"message":"We had issues producing the response to your request."}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":7,"status":"completed","conclusion":"success"}`))
+	})
+	defer closeServer()
+	run, err := client.PollForWorkflowCompletion(context.Background(), "o", "r", 7, time.Minute, nil)
+	if err != nil || run.Conclusion != "success" || calls != 3 {
+		t.Fatalf("got %#v, %v after %d calls", run, err, calls)
+	}
+}
+
+func TestPollForWorkflowCompletionGivesUpOnPersistentErrors(t *testing.T) {
+	old := workflowPollInterval
+	workflowPollInterval = time.Millisecond
+	defer func() { workflowPollInterval = old }()
+	calls := 0
+	client, closeServer := workflowTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadGateway)
+	})
+	defer closeServer()
+	if _, err := client.PollForWorkflowCompletion(context.Background(), "o", "r", 7, time.Minute, nil); err == nil || calls != maxConsecutivePollErrors {
+		t.Fatalf("err %v after %d calls", err, calls)
+	}
+}
