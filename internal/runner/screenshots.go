@@ -349,6 +349,7 @@ func captureScreenshots(run executor, sourceRoot, appPath, entitlements, flow, o
 		return fmt.Errorf("the screenshot flow took %d screenshots; the limit is %d", len(images), maxScreenshotImages)
 	}
 	if flowErr != nil {
+		appendSimulatorAppLog(run, dir, sim.UDID, filepath.Base(strings.TrimSuffix(appPath, ".app")))
 		// A failed required step fails the run. What was captured, plus Maestro's own failure
 		// screenshots (prefixed debug_), still travels encrypted so the caller can see where it stopped.
 		images = append(images, collectMaestroFailureScreenshots(shots)...)
@@ -446,4 +447,30 @@ func appendCrashReports(log io.Writer, dir, executable string, since time.Time) 
 		fmt.Fprintf(log, "\n--- crash report %s (first %d lines) ---\n%s\n", entry.Name(), len(lines), strings.Join(lines, "\n"))
 		shown++
 	}
+}
+
+// simulatorAppLogPredicate selects the app's own messages and what the system said about it, which
+// explains a launch that ends without a crash report (killed, failed signature or entitlement checks).
+func simulatorAppLogPredicate(executable string) string {
+	quoted := strings.ReplaceAll(executable, `"`, ``)
+	return fmt.Sprintf(`process == "%[1]s" OR ((process == "runningboardd" OR process == "SpringBoard" OR process == "amfid") AND eventMessage CONTAINS "%[1]s")`, quoted)
+}
+
+// appendSimulatorAppLog adds the last minutes of the simulator log for the app to the private log.
+func appendSimulatorAppLog(run executor, dir, udid, executable string) {
+	// Not run.capture: that copies the whole output into the log; only the tail is wanted.
+	cmd := exec.CommandContext(run.ctx, "xcrun", "simctl", "spawn", udid, "log", "show", "--last", "6m", "--style", "compact",
+		"--predicate", simulatorAppLogPredicate(executable))
+	cmd.Dir = dir
+	cmd.Env = run.env
+	out, err := cmd.Output()
+	if err != nil && len(out) == 0 {
+		fmt.Fprintf(run.log, "\nSimulator log unavailable: %v\n", err)
+		return
+	}
+	lines := strings.Split(string(out), "\n")
+	if len(lines) > 250 {
+		lines = lines[len(lines)-250:]
+	}
+	fmt.Fprintf(run.log, "\n--- simulator log for %s (last %d lines) ---\n%s\n", executable, len(lines), strings.Join(lines, "\n"))
 }
