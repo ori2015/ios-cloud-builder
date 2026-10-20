@@ -242,18 +242,20 @@ func captureScreenshots(run executor, sourceRoot, appPath, flow, outputPath stri
 	flowErr := maestro.run(shots, "maestro", "--no-ansi", "--device", sim.UDID, "test", "--test-output-dir", output, flow)
 	stopFaceID()
 	images := collectFlowScreenshots(shots)
-	if len(images) == 0 {
-		if flowErr != nil {
-			return flowErr
-		}
+	if len(images) == 0 && flowErr == nil {
 		return fmt.Errorf("the screenshot flow took no screenshots (use takeScreenshot)")
 	}
 	if len(images) > maxScreenshotImages {
 		return fmt.Errorf("the screenshot flow took %d screenshots; the limit is %d", len(images), maxScreenshotImages)
 	}
 	if flowErr != nil {
-		// Keep what was captured; the log says where the flow stopped.
-		fmt.Fprintf(run.log, "\nScreenshot flow stopped early (%v); returning the %d screenshots taken.\n", flowErr, len(images))
+		// A failed required step fails the run. What was captured, plus Maestro's own failure
+		// screenshots (prefixed debug_), still travels encrypted so the caller can see where it stopped.
+		images = append(images, collectMaestroFailureScreenshots(shots)...)
+		if len(images) == 0 {
+			return fmt.Errorf("screenshot flow failed: %w", flowErr)
+		}
+		fmt.Fprintf(run.log, "\nScreenshot flow failed (%v); returning %d images for diagnosis.\n", flowErr, len(images))
 	}
 	// Pack only the collected screenshots, flat, under their own names.
 	packed := filepath.Join(shots, "packed")
@@ -265,13 +267,41 @@ func captureScreenshots(run executor, sourceRoot, appPath, flow, outputPath stri
 		if err != nil {
 			return fmt.Errorf("read screenshot: %w", err)
 		}
-		if err := os.WriteFile(filepath.Join(packed, filepath.Base(image)), data, 0600); err != nil {
+		name := filepath.Base(image)
+		if filepath.Base(filepath.Dir(image)) == "screenshots" {
+			name = "debug_" + name
+		}
+		if err := os.WriteFile(filepath.Join(packed, name), data, 0600); err != nil {
 			return fmt.Errorf("stage screenshot: %w", err)
 		}
 	}
 	fmt.Fprintf(run.log, "\nCollected %d screenshots.\n", len(images))
 	_ = os.Remove(outputPath)
-	return run.run(packed, "/usr/bin/ditto", "-c", "-k", "--norsrc", ".", outputPath)
+	if err := run.run(packed, "/usr/bin/ditto", "-c", "-k", "--norsrc", ".", outputPath); err != nil {
+		return err
+	}
+	if flowErr != nil {
+		return fmt.Errorf("screenshot flow failed: %w", flowErr)
+	}
+	return nil
+}
+
+// collectMaestroFailureScreenshots returns the screenshots Maestro takes itself when a step
+// fails (<test-output-dir>/screenshots/), at most a few, newest last.
+func collectMaestroFailureScreenshots(shots string) []string {
+	var images []string
+	_ = filepath.Walk(shots, func(path string, info os.FileInfo, err error) error {
+		if err == nil && info.Mode().IsRegular() && strings.EqualFold(filepath.Ext(path), ".png") &&
+			filepath.Base(filepath.Dir(path)) == "screenshots" {
+			images = append(images, path)
+		}
+		return nil
+	})
+	sort.Strings(images)
+	if len(images) > 3 {
+		images = images[len(images)-3:]
+	}
+	return images
 }
 
 // collectFlowScreenshots returns the PNGs written by takeScreenshot: those in a

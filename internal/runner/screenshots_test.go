@@ -116,3 +116,20 @@ func TestScreenshotMediaMissingDirectoryIsFine(t *testing.T) {
 		t.Fatalf("got %v, %v", got, err)
 	}
 }
+
+func TestCollectMaestroFailureScreenshotsKeepsNewestThree(t *testing.T) {
+	shots := t.TempDir()
+	for _, rel := range []string{
+		"maestro-output/screenshots/screenshot-1.png", "maestro-output/screenshots/screenshot-2.png",
+		"maestro-output/screenshots/screenshot-3.png", "maestro-output/screenshots/screenshot-4.png",
+		"maestro-output/takeScreenshot/01_home.png",
+	} {
+		path := filepath.Join(shots, rel)
+		_ = os.MkdirAll(filepath.Dir(path), 0700)
+		_ = os.WriteFile(path, []byte("png"), 0600)
+	}
+	got := collectMaestroFailureScreenshots(shots)
+	if len(got) != 3 || filepath.Base(got[0]) != "screenshot-2.png" || filepath.Base(got[2]) != "screenshot-4.png" {
+		t.Fatalf("got %v", got)
+	}
+}
