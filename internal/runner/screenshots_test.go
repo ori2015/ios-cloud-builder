@@ -59,3 +59,29 @@ func TestScreenshotFlowMissing(t *testing.T) {
 		t.Fatal("missing flow accepted")
 	}
 }
+
+func TestCollectFlowScreenshotsSkipsMaestroDebugImages(t *testing.T) {
+	shots := t.TempDir()
+	write := func(rel string) {
+		path := filepath.Join(shots, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("png"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("maestro-output/takeScreenshot/02_map.png")
+	write("maestro-output/takeScreenshot/01_home.png")
+	write("maestro-output/screenshots/screenshot-step-3.png")
+	write("maestro-output/commands.json")
+	write("legacy.png")
+	got := collectFlowScreenshots(shots)
+	var names []string
+	for _, p := range got {
+		names = append(names, filepath.Base(p))
+	}
+	if len(names) != 3 || names[0] != "legacy.png" || names[1] != "01_home.png" || names[2] != "02_map.png" {
+		t.Fatalf("got %v", names)
+	}
+}
