@@ -455,10 +455,10 @@ func appendCrashReports(log io.Writer, dir, executable string, since time.Time) 
 func simulatorAppLogPredicate(executable, bundleID string) string {
 	exe := strings.ReplaceAll(executable, `"`, ``)
 	id := strings.ReplaceAll(bundleID, `"`, ``)
-	predicate := fmt.Sprintf(`process == "%[1]s" OR eventMessage CONTAINS "%[1]s"`, exe)
+	predicate := fmt.Sprintf(`process == %[1]q OR eventMessage CONTAINS %[1]q`, exe)
 	if id != "" {
 		// Launch refusals (launchd, dyld, code signing) name the bundle, not the process.
-		predicate += fmt.Sprintf(` OR eventMessage CONTAINS[c] "%s"`, id)
+		predicate += fmt.Sprintf(` OR eventMessage CONTAINS[c] %q`, id)
 	}
 	return predicate
 }
