@@ -203,3 +203,21 @@ func TestLaunchedPIDReadsSimctlOutput(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestSimulatorBuildArgsSignLocallyEmbedsEntitlements(t *testing.T) {
+	// Regression: FlowSip trapped on launch because the unsigned simulator build carried no
+	// CloudKit entitlement. The first attempt signs to run locally, with no team or profile.
+	signed := strings.Join(simulatorBuildArgs("App.xcworkspace", "", "App", "Release", "/dd", true), " ")
+	for _, want := range []string{"-workspace App.xcworkspace", "-sdk iphonesimulator", "CODE_SIGN_IDENTITY=-", "DEVELOPMENT_TEAM=", "PROVISIONING_PROFILE_SPECIFIER="} {
+		if !strings.Contains(signed, want) {
+			t.Fatalf("missing %q in %s", want, signed)
+		}
+	}
+	if strings.Contains(signed, "CODE_SIGNING_ALLOWED=NO") {
+		t.Fatalf("signed build disables signing: %s", signed)
+	}
+	unsigned := strings.Join(simulatorBuildArgs("", "App.xcodeproj", "App", "Release", "/dd", false), " ")
+	if !strings.Contains(unsigned, "-project App.xcodeproj") || !strings.Contains(unsigned, "CODE_SIGNING_ALLOWED=NO") || strings.Contains(unsigned, "CODE_SIGN_IDENTITY") {
+		t.Fatalf("unsigned fallback wrong: %s", unsigned)
+	}
+}
