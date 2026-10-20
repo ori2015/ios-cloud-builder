@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -504,4 +505,32 @@ func appendConsoleLaunch(run executor, dir, udid, bundleID string) {
 		out = out[len(out)-32<<10:]
 	}
 	fmt.Fprintf(run.log, "\n--- console of a diagnostic launch of %s (%s, %v) ---\n%s\n", bundleID, consoleLaunchWindow, err, out)
+	pid := launchedPID(out, bundleID)
+	if pid == "" {
+		return
+	}
+	// What the process and the system said about this exact launch, including why it ended.
+	logCmd := exec.CommandContext(run.ctx, "xcrun", "simctl", "spawn", udid, "log", "show", "--last", "2m", "--style", "compact",
+		"--predicate", fmt.Sprintf(`processID == %s OR eventMessage CONTAINS %q`, pid, "["+pid+"]")+` OR eventMessage CONTAINS "`+pid+`"`)
+	logCmd.Dir = dir
+	logCmd.Env = run.env
+	logOut, _ := logCmd.Output()
+	lines := strings.Split(string(logOut), "\n")
+	if len(lines) > 300 {
+		lines = lines[len(lines)-300:]
+	}
+	fmt.Fprintf(run.log, "\n--- simulator log for pid %s (last %d lines) ---\n%s\n", pid, len(lines), strings.Join(lines, "\n"))
+}
+
+// launchedPID reads the "<bundle id>: <pid>" line simctl launch prints first.
+func launchedPID(output []byte, bundleID string) string {
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(line, bundleID+": "); ok {
+			if _, err := strconv.Atoi(rest); err == nil {
+				return rest
+			}
+		}
+	}
+	return ""
 }

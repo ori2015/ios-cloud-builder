@@ -194,3 +194,12 @@ func TestSimulatorAppLogPredicateNamesTheApp(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestLaunchedPIDReadsSimctlOutput(t *testing.T) {
+	if got := launchedPID([]byte("com.drinkordry.app: 20876\nsome app output\n"), "com.drinkordry.app"); got != "20876" {
+		t.Fatalf("got %q", got)
+	}
+	if got := launchedPID([]byte("An error was encountered processing the command\n"), "com.drinkordry.app"); got != "" {
+		t.Fatalf("got %q", got)
+	}
+}
