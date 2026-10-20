@@ -48,7 +48,7 @@ var skipDirs = map[string]bool{
 var skipSuffixes = []string{".xcodeproj", ".xcworkspace", ".app", ".framework", ".xcframework", ".xcassets", ".bundle", ".lproj", ".playground"}
 
 var (
-	nodeMarkerRe     = regexp.MustCompile(`"(expo|react-native|cordova|ionic|nativescript)"|"@(capacitor|ionic|nativescript)/`)
+	nodeMarkerRe     = regexp.MustCompile(`"(expo|react-native|cordova|ionic|nativescript|sparkling-app-cli)"|"@(capacitor|ionic|nativescript)/`)
 	xcodegenTargetRe = regexp.MustCompile(`(?m)^targets:`)
 )
 
