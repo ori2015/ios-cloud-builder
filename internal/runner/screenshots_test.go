@@ -85,3 +85,34 @@ func TestCollectFlowScreenshotsSkipsMaestroDebugImages(t *testing.T) {
 		t.Fatalf("got %v", names)
 	}
 }
+
+func TestScreenshotMediaListsOnlyMediaInsideCheckout(t *testing.T) {
+	source := t.TempDir()
+	source, _ = filepath.EvalSymlinks(source)
+	media := filepath.Join(source, ".maestro", "media")
+	if err := os.MkdirAll(media, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"b.jpg", "a.PNG", "notes.txt", "clip.mov"} {
+		_ = os.WriteFile(filepath.Join(media, name), []byte("x"), 0600)
+	}
+	flow := filepath.Join(source, ".maestro", "screenshots.yaml")
+	got, err := screenshotMedia(source, flow)
+	if err != nil || len(got) != 3 || filepath.Base(got[0]) != "a.PNG" {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	outside := filepath.Join(t.TempDir(), "x.jpg")
+	_ = os.WriteFile(outside, []byte("x"), 0600)
+	_ = os.Symlink(outside, filepath.Join(media, "z.jpg"))
+	if _, err := screenshotMedia(source, flow); err == nil {
+		t.Fatal("media outside the checkout accepted")
+	}
+}
+
+func TestScreenshotMediaMissingDirectoryIsFine(t *testing.T) {
+	source := t.TempDir()
+	got, err := screenshotMedia(source, filepath.Join(source, ".maestro", "screenshots.yaml"))
+	if err != nil || len(got) != 0 {
+		t.Fatalf("got %v, %v", got, err)
+	}
+}

@@ -317,7 +317,7 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 			if err != nil {
 				return err
 			}
-			return captureScreenshots(run, simApp, flow, options.IPAPath)
+			return captureScreenshots(run, sourceRoot, simApp, flow, options.IPAPath)
 		}
 		mode := "--release"
 		if options.Configuration == "Debug" {
@@ -365,7 +365,7 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 			if err != nil {
 				return err
 			}
-			return captureScreenshots(run, simApp, flow, options.IPAPath)
+			return captureScreenshots(run, sourceRoot, simApp, flow, options.IPAPath)
 		}
 		args := make([]string, 0, 20)
 		if workspace != "" {
