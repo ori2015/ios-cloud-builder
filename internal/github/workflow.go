@@ -21,9 +21,14 @@ var (
 const (
 	// workflowStartPollInterval is the polling interval when waiting for workflow to start.
 	workflowStartPollInterval = 2 * time.Second
-	workflowPollInterval      = 5 * time.Second
 	maxWorkflowRunPages       = 10
+	// maxConsecutivePollErrors is how many failed status reads in a row a long build survives:
+	// GitHub answers the odd poll with a 502, which must not abandon a 20-minute build.
+	maxConsecutivePollErrors = 8
 )
+
+// workflowPollInterval is a variable so tests can poll quickly.
+var workflowPollInterval = 5 * time.Second
 
 // TriggerWorkflow triggers a workflow_dispatch event
 func (c *Client) TriggerWorkflow(ctx context.Context, owner, repo, workflowFile string, inputs map[string]string) error {
@@ -142,16 +147,25 @@ func (c *Client) FindWorkflowRunByBuildID(ctx context.Context, owner, repo, work
 // a concurrent dispatch can never be adopted.
 func (c *Client) PollForWorkflowCompletion(ctx context.Context, owner, repo string, runID int64, timeout time.Duration, onPoll func()) (*WorkflowRun, error) {
 	deadline := time.Now().Add(timeout)
+	failures := 0
 	for {
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("timed out waiting for workflow run %d to complete", runID)
 		}
 		run, err := c.GetWorkflowRun(ctx, owner, repo, runID)
 		if err != nil {
-			return nil, err
-		}
-		if run.Status == "completed" {
-			return run, nil
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			failures++
+			if failures >= maxConsecutivePollErrors {
+				return nil, err
+			}
+		} else {
+			failures = 0
+			if run.Status == "completed" {
+				return run, nil
+			}
 		}
 		if onPoll != nil {
 			onPoll()
