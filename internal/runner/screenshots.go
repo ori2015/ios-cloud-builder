@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -26,7 +27,28 @@ const (
 	screenshotMediaDir = "media"
 	maxScreenshotMedia = 30
 	faceIDMatchEvery   = 2 * time.Second
+	// maestroDriverStartupTimeoutMs gives the XCTest driver five minutes to start.
+	maestroDriverStartupTimeoutMs = "300000"
 )
+
+// isMaestroDriverStartupFailure reports whether Maestro failed before running any step
+// because its iOS driver did not start; that is safe and worth one retry.
+func isMaestroDriverStartupFailure(output []byte) bool {
+	return bytes.Contains(output, []byte("iOS driver not ready in time")) ||
+		bytes.Contains(output, []byte("IOSDriverTimeoutException"))
+}
+
+// runMaestroFlow runs the flow once more when the first attempt never got its driver up.
+func runMaestroFlow(maestro executor, dir, udid, output, flow string) error {
+	args := []string{"--no-ansi", "--device", udid, "test", "--test-output-dir", output, flow}
+	out, err := maestro.runCollect(dir, "maestro", args...)
+	if err != nil && isMaestroDriverStartupFailure(out) {
+		fmt.Fprintln(maestro.log, "\nMaestro's iOS driver did not start; retrying the flow once.")
+		_ = os.RemoveAll(output)
+		_, err = maestro.runCollect(dir, "maestro", args...)
+	}
+	return err
+}
 
 var screenshotMediaExtensions = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".heic": true, ".mov": true, ".mp4": true}
 
@@ -298,12 +320,14 @@ func captureScreenshots(run executor, sourceRoot, appPath, entitlements, flow, o
 	defer func() { _ = os.RemoveAll(shots) }()
 	// Maestro writes takeScreenshot files relative to its working directory.
 	maestro := run
-	maestro.env = append(append([]string{}, run.env...), "MAESTRO_CLI_NO_ANALYTICS=1", "MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED=true")
+	maestro.env = append(append([]string{}, run.env...), "MAESTRO_CLI_NO_ANALYTICS=1", "MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED=true",
+		// The XCTest driver can take minutes to come up on a freshly booted hosted runner.
+		"MAESTRO_DRIVER_STARTUP_TIMEOUT="+maestroDriverStartupTimeoutMs)
 	// Maestro 2.x writes takeScreenshot files to <test-output-dir>/takeScreenshot/; its own
 	// per-step debug screenshots go elsewhere in that folder and are not returned.
 	output := filepath.Join(shots, "maestro-output")
 	stopFaceID := approveFaceIDWhileRunning(run, dir, sim.UDID)
-	flowErr := maestro.run(shots, "maestro", "--no-ansi", "--device", sim.UDID, "test", "--test-output-dir", output, flow)
+	flowErr := runMaestroFlow(maestro, shots, sim.UDID, output, flow)
 	stopFaceID()
 	if home, err := os.UserHomeDir(); err == nil {
 		appendCrashReports(run.log, filepath.Join(home, "Library", "Logs", "DiagnosticReports"),
