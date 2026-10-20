@@ -568,6 +568,17 @@ XcodeGen project.`,
 	RunE: runIOSTest,
 }
 
+var iosScreenshotsCmd = &cobra.Command{
+	Use:   "screenshots",
+	Short: "Capture App Store screenshots on an iPhone simulator through the central builder",
+	Long: `Builds the private working-tree snapshot for the iOS Simulator on the central builder,
+boots the newest iPhone Pro Max simulator (6.9", 1320x2868) with a 9:41 status bar, and runs the
+project's Maestro flow at .maestro/screenshots.yaml (next to the app, or at the repository root).
+Every takeScreenshot in the flow is returned encrypted and saved as a PNG under <output>/screenshots.
+Nothing is signed. Requires backend=central.`,
+	RunE: runIOSScreenshots,
+}
+
 var iosDeployCmd = &cobra.Command{
 	Use:   "deploy",
 	Short: "Build, sign, and upload to TestFlight",
@@ -658,6 +669,10 @@ func init() {
 	iosTestCmd.Flags().Duration("timeout", 40*time.Minute, "Test timeout")
 	iosTestCmd.Flags().StringP("remote", "r", "origin", "Git remote to push the working-tree snapshot to")
 	iosCmd.AddCommand(iosTestCmd)
+	iosScreenshotsCmd.Flags().StringP("output", "o", "dist", "Output directory for the screenshots and log")
+	iosScreenshotsCmd.Flags().Duration("timeout", 45*time.Minute, "Screenshot run timeout")
+	iosScreenshotsCmd.Flags().StringP("remote", "r", "origin", "Git remote to push the working-tree snapshot to")
+	iosCmd.AddCommand(iosScreenshotsCmd)
 	iosDeployCmd.Flags().StringP("output", "o", "dist", "Output directory for decrypted diagnostic logs")
 	iosDeployCmd.Flags().Duration("timeout", 3*time.Hour, "Deployment timeout, including App Store Connect processing")
 	iosDeployCmd.Flags().StringP("remote", "r", "origin", "Git remote to push the working-tree snapshot to")
@@ -739,6 +754,29 @@ func runIOSTest(cmd *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return runBuild(ctx, cfg, build.BuildOptions{OutputDir: outputDir, Timeout: timeout, RunTests: true, Remote: remote})
+}
+
+func runIOSScreenshots(cmd *cobra.Command, _ []string) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+	if !cfg.IsCentral() {
+		return fmt.Errorf("`builder ios screenshots` requires backend=central")
+	}
+	outputDir, _ := cmd.Flags().GetString("output")
+	timeout, _ := cmd.Flags().GetDuration("timeout")
+	remote, _ := cmd.Flags().GetString("remote")
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runBuild(ctx, cfg, build.BuildOptions{OutputDir: outputDir, Timeout: timeout, Screenshots: true, Remote: remote})
 }
 
 func runIOSDeploy(cmd *cobra.Command, _ []string) error {
@@ -827,7 +865,15 @@ func runBuild(ctx context.Context, cfg *config.Config, opts build.BuildOptions) 
 		return err
 	}
 
-	if opts.RunTests {
+	if opts.Screenshots {
+		fmt.Printf("Screenshots (%d):\n", len(result.ScreenshotPaths))
+		for _, path := range result.ScreenshotPaths {
+			fmt.Printf("  %s\n", path)
+		}
+		if result.LogPath != "" {
+			fmt.Printf("Log: %s\n", result.LogPath)
+		}
+	} else if opts.RunTests {
 		fmt.Println("Simulator tests passed")
 		fmt.Printf("Test log: %s\n", result.LogPath)
 	} else if result.TestFlight {

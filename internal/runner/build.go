@@ -38,6 +38,9 @@ type BuildOptions struct {
 	// RunTests runs `xcodebuild test` on an iOS Simulator instead of producing
 	// an IPA. Supported for native Xcode / XcodeGen projects only.
 	RunTests bool
+	// Screenshots builds for the iOS Simulator, runs the project's Maestro flow
+	// (.maestro/screenshots.yaml) and returns the PNGs as a zip in the IPA slot.
+	Screenshots bool
 }
 
 // ExecuteSecure keeps the trusted runner resident while private project code
@@ -216,8 +219,8 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 		}
 	}
 	if options.Framework == FrameworkTauri {
-		if options.RunTests {
-			return fmt.Errorf("simulator tests are supported for native Xcode and XcodeGen projects only")
+		if options.RunTests || options.Screenshots {
+			return fmt.Errorf("simulator tests and screenshots are not supported for Tauri projects")
 		}
 		if exists(filepath.Join(appRoot, "package.json")) {
 			if err := installNodeDependencies(run, appRoot); err != nil {
@@ -294,6 +297,12 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 		return fmt.Errorf("simulator tests are supported for native Xcode and XcodeGen projects only")
 	}
 	var appPath string
+	var flow string
+	if options.Screenshots {
+		if flow, err = screenshotFlow(sourceRoot, appRoot); err != nil {
+			return err
+		}
+	}
 	if options.Framework == FrameworkFlutter {
 		flutterRoot := appRoot
 		if output, err := run.runCollect(flutterRoot, "flutter", "pub", "get"); err != nil {
@@ -302,6 +311,13 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 				return fmt.Errorf("%s: %w", explanation, err)
 			}
 			return err
+		}
+		if options.Screenshots {
+			simApp, err := buildForSimulator(run, options, flutterRoot, iosRoot, "", "", "", "")
+			if err != nil {
+				return err
+			}
+			return captureScreenshots(run, simApp, flow, options.IPAPath)
 		}
 		mode := "--release"
 		if options.Configuration == "Debug" {
@@ -343,6 +359,13 @@ func buildUnsigned(ctx context.Context, options *BuildOptions, privateLog io.Wri
 		defer func() { _ = os.RemoveAll(derivedData) }()
 		if options.RunTests {
 			return runSimulatorTests(run, iosRoot, workspace, project, scheme, derivedData)
+		}
+		if options.Screenshots {
+			simApp, err := buildForSimulator(run, options, appRoot, iosRoot, workspace, project, scheme, derivedData)
+			if err != nil {
+				return err
+			}
+			return captureScreenshots(run, simApp, flow, options.IPAPath)
 		}
 		args := make([]string, 0, 20)
 		if workspace != "" {

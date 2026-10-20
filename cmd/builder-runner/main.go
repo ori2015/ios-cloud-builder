@@ -368,6 +368,7 @@ func execute(args []string) error {
 	flags.StringVar(&outputDir, "output", "", "")
 	flags.BoolVar(&projectIntermediate, "project-intermediate", false, "")
 	flags.BoolVar(&options.RunTests, "run-tests", false, "")
+	flags.BoolVar(&options.Screenshots, "screenshots", false, "")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return fmt.Errorf("invalid secure execution arguments")
 	}
