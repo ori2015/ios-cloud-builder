@@ -1,12 +1,15 @@
 package runner
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Screenshot capture runs the project's Maestro flow on an iPhone simulator and
@@ -17,7 +20,75 @@ const (
 	screenshotFlowDir   = ".maestro"
 	screenshotFlowFile  = "screenshots.yaml"
 	maxScreenshotImages = 40
+	// screenshotMediaDir, next to the flow, holds photos and videos added to the
+	// simulator's library before the flow runs (for apps that import from Photos).
+	screenshotMediaDir = "media"
+	maxScreenshotMedia = 30
+	faceIDMatchEvery   = 2 * time.Second
 )
+
+var screenshotMediaExtensions = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".heic": true, ".mov": true, ".mp4": true}
+
+// screenshotMedia lists the media files beside the flow, refusing anything that resolves outside the checkout.
+func screenshotMedia(sourceRoot, flow string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(filepath.Dir(flow), screenshotMediaDir))
+	if err != nil {
+		return nil, nil
+	}
+	var files []string
+	for _, entry := range entries {
+		if !screenshotMediaExtensions[strings.ToLower(filepath.Ext(entry.Name()))] {
+			continue
+		}
+		resolved, err := filepath.EvalSymlinks(filepath.Join(filepath.Dir(flow), screenshotMediaDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(resolved)
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		if !pathWithin(sourceRoot, resolved) {
+			return nil, fmt.Errorf("screenshot media %s points outside the checkout", entry.Name())
+		}
+		files = append(files, resolved)
+	}
+	if len(files) > maxScreenshotMedia {
+		return nil, fmt.Errorf("%d screenshot media files; the limit is %d", len(files), maxScreenshotMedia)
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+// approveFaceIDWhileRunning enrolls Face ID on the simulator and keeps answering any Face ID
+// prompt with a match until stop is called. A match with no prompt on screen does nothing, so
+// apps that never ask are unaffected. This only drives the simulator; app code is unchanged.
+func approveFaceIDWhileRunning(run executor, dir, udid string) (stop func()) {
+	_ = run.run(dir, "xcrun", "simctl", "spawn", udid, "notifyutil", "-s", "com.apple.BiometricKit.enrollmentChanged", "1")
+	_ = run.run(dir, "xcrun", "simctl", "spawn", udid, "notifyutil", "-p", "com.apple.BiometricKit.enrollmentChanged")
+	ctx, cancel := context.WithCancel(run.ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(faceIDMatchEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				cmd := exec.CommandContext(ctx, "xcrun", "simctl", "spawn", udid, "notifyutil", "-p", "com.apple.BiometricKit_Sim.pearl.match")
+				cmd.Dir = dir
+				cmd.Env = run.env
+				_ = cmd.Run() // quiet: one line every two seconds would bury the log
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
 
 // screenshotFlow returns the Maestro flow for the app: <app>/.maestro/screenshots.yaml,
 // falling back to the repository root. The flow is project content, like the
@@ -122,7 +193,11 @@ func buildForSimulator(run executor, options *BuildOptions, appRoot, iosRoot, wo
 
 // captureScreenshots installs the simulator app, runs the Maestro flow and packs the PNGs
 // it produced into a zip at outputPath (the encrypted "IPA" slot of the artifact).
-func captureScreenshots(run executor, appPath, flow, outputPath string) error {
+func captureScreenshots(run executor, sourceRoot, appPath, flow, outputPath string) error {
+	media, err := screenshotMedia(sourceRoot, flow)
+	if err != nil {
+		return err
+	}
 	list, err := run.capture(filepath.Dir(appPath), "xcrun", "simctl", "list", "devices", "available", "-j")
 	if err != nil {
 		return fmt.Errorf("list simulators: %w", err)
@@ -146,6 +221,11 @@ func captureScreenshots(run executor, appPath, flow, outputPath string) error {
 	if err := run.run(dir, "xcrun", "simctl", "install", sim.UDID, appPath); err != nil {
 		return err
 	}
+	if len(media) > 0 {
+		if err := run.run(dir, "xcrun", append([]string{"simctl", "addmedia", sim.UDID}, media...)...); err != nil {
+			return err
+		}
+	}
 	shots := filepath.Join(filepath.Dir(outputPath), "screenshots")
 	_ = os.RemoveAll(shots)
 	if err := os.Mkdir(shots, 0700); err != nil {
@@ -158,7 +238,9 @@ func captureScreenshots(run executor, appPath, flow, outputPath string) error {
 	// Maestro 2.x writes takeScreenshot files to <test-output-dir>/takeScreenshot/; its own
 	// per-step debug screenshots go elsewhere in that folder and are not returned.
 	output := filepath.Join(shots, "maestro-output")
+	stopFaceID := approveFaceIDWhileRunning(run, dir, sim.UDID)
 	flowErr := maestro.run(shots, "maestro", "--no-ansi", "--device", sim.UDID, "test", "--test-output-dir", output, flow)
+	stopFaceID()
 	images := collectFlowScreenshots(shots)
 	if len(images) == 0 {
 		if flowErr != nil {
