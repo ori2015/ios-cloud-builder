@@ -64,6 +64,16 @@ func BundleID(root string, layout *Layout, configuration string) (id, reason str
 			return pickAppID(literal)
 		}
 	}
+	if layout.Kind == KindMAUI {
+		if csproj, _, ok := MAUIProject(appDir); ok {
+			if data, err := os.ReadFile(filepath.Join(appDir, csproj)); err == nil {
+				if m := mauiApplicationIDRe.FindSubmatch(data); m != nil {
+					return validOrReason(string(m[1]))
+				}
+			}
+		}
+		return "", "the MAUI project sets no literal <ApplicationId>"
+	}
 	if layout.Kind == KindTauri {
 		if id := tauriBundleID(appDir); id != "" {
 			return validOrReason(id)
@@ -132,7 +142,7 @@ func pickAppID(ids []string) (string, string) {
 		}
 	}
 	for _, id := range ids {
-		if id != shortest && !strings.HasPrefix(id, shortest+".") {
+		if id != shortest && !strings.HasPrefix(id, shortest+".") && !isTestSuffix(strings.TrimPrefix(id, shortest), id, shortest) {
 			return "", fmt.Sprintf("the project has unrelated bundle identifiers (%s and %s); pass --bundle-id", shortest, id)
 		}
 	}
@@ -187,6 +197,8 @@ func capacitorBundleID(appDir string) string {
 	return ""
 }
 
+var mauiApplicationIDRe = regexp.MustCompile(`<ApplicationId>([^<$]+)</ApplicationId>`)
+
 var tauriIdentifierRe = regexp.MustCompile(`(?m)^\s*"?identifier"?\s*[:=]\s*["']([^"']+)["']`)
 
 // tauriBundleID reads the Tauri 2 top-level identifier from src-tauri's config.
@@ -224,4 +236,10 @@ func nativeScriptBundleID(appDir string) string {
 		}
 	}
 	return ""
+}
+
+// isTestSuffix accepts the test-target naming "<app>Tests" / "<app>UITests",
+// which extends the application's identifier without a dot.
+func isTestSuffix(rest, id, shortest string) bool {
+	return strings.HasPrefix(id, shortest) && (rest == "Tests" || rest == "UITests" || rest == "Test" || rest == "tests")
 }

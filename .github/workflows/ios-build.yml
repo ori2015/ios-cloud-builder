@@ -152,10 +152,16 @@ jobs:
           echo "DEVELOPER_DIR=$app/Contents/Developer" >> "$GITHUB_ENV"
 
       - name: Set up Node.js
-        if: steps.detect.outputs.framework == 'react-native' || steps.detect.outputs.framework == 'expo' || steps.detect.outputs.framework == 'cordova' || steps.detect.outputs.framework == 'ionic' || steps.detect.outputs.framework == 'tauri' || steps.detect.outputs.framework == 'nativescript'
+        if: steps.detect.outputs.framework == 'react-native' || steps.detect.outputs.framework == 'expo' || steps.detect.outputs.framework == 'cordova' || steps.detect.outputs.framework == 'ionic' || steps.detect.outputs.framework == 'tauri' || steps.detect.outputs.framework == 'nativescript' || steps.detect.outputs.framework == 'sparkling'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: ${{ steps.tools.outputs.node_version || '20' }}
+
+      - name: Install Tauri iOS prerequisites
+        if: steps.detect.outputs.framework == 'tauri'
+        run: |
+          # The Tauri CLI would otherwise run brew itself inside the isolated build.
+          brew install xcodegen libimobiledevice
 
       - name: Set up Java for Kotlin Multiplatform
         if: steps.detect.outputs.framework == 'kmp'

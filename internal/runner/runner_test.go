@@ -154,6 +154,10 @@ func TestInputsValidate(t *testing.T) {
 	}
 }
 
+// isolatedHome is the private HOME the tests pass in; joined paths are built from it
+// so expectations hold with either path separator.
+var isolatedHome = "/isolated-home"
+
 func TestChildEnvironmentScrubsActionsAndCredentials(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "secret")
 	t.Setenv("GITHUB_WORKSPACE", "/private")
@@ -174,7 +178,7 @@ func TestChildEnvironmentScrubsActionsAndCredentials(t *testing.T) {
 			t.Fatalf("child environment leaked %q: %s", forbidden, env)
 		}
 	}
-	for _, required := range []string{"PATH=/usr/bin", "HOME=/isolated-home", "JAVA_HOME=/java", "CODE_SIGNING_ALLOWED=NO"} {
+	for _, required := range []string{"PATH=" + filepath.Join(isolatedHome, ".cargo", "bin") + string(os.PathListSeparator) + "/usr/bin", "CARGO_HOME=" + filepath.Join(isolatedHome, ".cargo"), "HOME=/isolated-home", "JAVA_HOME=/java", "CODE_SIGNING_ALLOWED=NO"} {
 		if !strings.Contains(env, required) {
 			t.Fatalf("child environment missing %q: %s", required, env)
 		}
@@ -403,5 +407,26 @@ func TestValidateAcceptsSimulatorTestOperation(t *testing.T) {
 	in.Operation = "tests; rm -rf /"
 	if err := in.Validate(); err == nil {
 		t.Fatal("unknown operation accepted")
+	}
+}
+
+func TestChildEnvironmentRustToolchain(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".rustup"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CARGO_HOME", home+"/.cargo")
+	t.Setenv("RUSTUP_HOME", "")
+	env := strings.Join(ChildEnvironment("/source", "/isolated-home"), "\n")
+	// toolchains come from the real directory, but cargo state and installs stay private
+	for _, want := range []string{"RUSTUP_HOME=" + filepath.Join(home, ".rustup"), "CARGO_HOME=" + filepath.Join(isolatedHome, ".cargo")} {
+		if !strings.Contains(env, want) {
+			t.Errorf("environment lacks %q:\n%s", want, env)
+		}
+	}
+	if strings.Contains(env, "CARGO_HOME="+home) {
+		t.Errorf("the runner's CARGO_HOME leaked into the build:\n%s", env)
 	}
 }
