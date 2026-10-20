@@ -42,12 +42,25 @@ func isMaestroDriverStartupFailure(output []byte) bool {
 		bytes.Contains(output, []byte("IOSDriverTimeoutException"))
 }
 
-// runMaestroFlow runs the flow once more when the first attempt never got its driver up.
+// maestroReportedFailedStep reports whether a flow step itself failed ("<step>... FAILED").
+// Without one, Maestro died on its own (driver connection), which is worth one retry; a failed
+// step is a real result and is never retried.
+func maestroReportedFailedStep(output []byte) bool {
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.HasSuffix(strings.TrimSpace(line), "... FAILED") {
+			return true
+		}
+	}
+	return false
+}
+
+// runMaestroFlow runs the flow once more when the first attempt never got its driver up
+// or Maestro stopped without any failed step.
 func runMaestroFlow(maestro executor, dir, udid, output, flow string) error {
 	args := []string{"--no-ansi", "--device", udid, "test", "--test-output-dir", output, flow}
 	out, err := maestro.runCollect(dir, "maestro", args...)
-	if err != nil && isMaestroDriverStartupFailure(out) {
-		fmt.Fprintln(maestro.log, "\nMaestro's iOS driver did not start; retrying the flow once.")
+	if err != nil && (isMaestroDriverStartupFailure(out) || !maestroReportedFailedStep(out)) {
+		fmt.Fprintln(maestro.log, "\nMaestro stopped without a failed step (driver startup or connection); retrying the flow once.")
 		_ = os.RemoveAll(output)
 		_, err = maestro.runCollect(dir, "maestro", args...)
 	}

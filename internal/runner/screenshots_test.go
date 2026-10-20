@@ -221,3 +221,15 @@ func TestSimulatorBuildArgsSignLocallyEmbedsEntitlements(t *testing.T) {
 		t.Fatalf("unsigned fallback wrong: %s", unsigned)
 	}
 }
+
+func TestMaestroReportedFailedStep(t *testing.T) {
+	failed := []byte("Tap on \"Places\"... COMPLETED\nAssert that \"My Places\" is visible... FAILED\n")
+	aborted := []byte("Tap on \"Places\"... COMPLETED\nAssert that \"My Places\" is visible...\n==== Debug output ====\n")
+	if !maestroReportedFailedStep(failed) {
+		t.Fatal("a failed step was not recognised")
+	}
+	// Regression: Maestro died mid-step in a Trip Nearby run with no failed step; that is retried.
+	if maestroReportedFailedStep(aborted) {
+		t.Fatal("an aborted run counted as a failed step")
+	}
+}
