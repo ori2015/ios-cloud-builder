@@ -166,3 +166,12 @@ func TestAppendCrashReportsShowsOnlyThisAppsNewReports(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestMaestroDriverStartupFailureIsRecognised(t *testing.T) {
+	if !isMaestroDriverStartupFailure([]byte("iOS driver not ready in time, consider increasing timeout")) {
+		t.Fatal("driver timeout not recognised")
+	}
+	if isMaestroDriverStartupFailure([]byte(`Assertion is false: "Recommended Route" is visible`)) {
+		t.Fatal("a failed step must not be retried")
+	}
+}
