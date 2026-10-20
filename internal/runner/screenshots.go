@@ -155,14 +155,11 @@ func captureScreenshots(run executor, appPath, flow, outputPath string) error {
 	// Maestro writes takeScreenshot files relative to its working directory.
 	maestro := run
 	maestro.env = append(append([]string{}, run.env...), "MAESTRO_CLI_NO_ANALYTICS=1", "MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED=true")
-	flowErr := maestro.run(shots, "maestro", "--no-ansi", "--device", sim.UDID, "test", flow)
-	var images []string
-	_ = filepath.Walk(shots, func(path string, info os.FileInfo, err error) error {
-		if err == nil && info.Mode().IsRegular() && strings.EqualFold(filepath.Ext(path), ".png") {
-			images = append(images, path)
-		}
-		return nil
-	})
+	// Maestro 2.x writes takeScreenshot files to <test-output-dir>/takeScreenshot/; its own
+	// per-step debug screenshots go elsewhere in that folder and are not returned.
+	output := filepath.Join(shots, "maestro-output")
+	flowErr := maestro.run(shots, "maestro", "--no-ansi", "--device", sim.UDID, "test", "--test-output-dir", output, flow)
+	images := collectFlowScreenshots(shots)
 	if len(images) == 0 {
 		if flowErr != nil {
 			return flowErr
@@ -176,6 +173,38 @@ func captureScreenshots(run executor, appPath, flow, outputPath string) error {
 		// Keep what was captured; the log says where the flow stopped.
 		fmt.Fprintf(run.log, "\nScreenshot flow stopped early (%v); returning the %d screenshots taken.\n", flowErr, len(images))
 	}
+	// Pack only the collected screenshots, flat, under their own names.
+	packed := filepath.Join(shots, "packed")
+	if err := os.Mkdir(packed, 0700); err != nil {
+		return fmt.Errorf("prepare screenshot archive")
+	}
+	for _, image := range images {
+		data, err := os.ReadFile(image)
+		if err != nil {
+			return fmt.Errorf("read screenshot: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(packed, filepath.Base(image)), data, 0600); err != nil {
+			return fmt.Errorf("stage screenshot: %w", err)
+		}
+	}
+	fmt.Fprintf(run.log, "\nCollected %d screenshots.\n", len(images))
 	_ = os.Remove(outputPath)
-	return run.run(shots, "/usr/bin/ditto", "-c", "-k", "--norsrc", ".", outputPath)
+	return run.run(packed, "/usr/bin/ditto", "-c", "-k", "--norsrc", ".", outputPath)
+}
+
+// collectFlowScreenshots returns the PNGs written by takeScreenshot: those in a
+// takeScreenshot folder (Maestro 2.x), or directly in the working folder (older Maestro).
+func collectFlowScreenshots(shots string) []string {
+	var images []string
+	_ = filepath.Walk(shots, func(path string, info os.FileInfo, err error) error {
+		if err != nil || !info.Mode().IsRegular() || !strings.EqualFold(filepath.Ext(path), ".png") {
+			return nil
+		}
+		if dir := filepath.Dir(path); filepath.Base(dir) == "takeScreenshot" || dir == shots {
+			images = append(images, path)
+		}
+		return nil
+	})
+	sort.Strings(images)
+	return images
 }
