@@ -44,7 +44,7 @@ func runCentralDetect(cmd *cobra.Command, _ []string) error {
 	versions := runner.ReadToolVersions(root, appRoot)
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "app_path=%s\nios_path=%s\nframework=%s\nbundle_id=%s\n", facts.AppPath, facts.IOSPath, facts.Framework, facts.BundleID)
-	fmt.Fprintf(out, "flutter_version=%s\nnode_version=%s\nxcode_version=%s\n", versions.Flutter, versions.Node, versions.Xcode)
+	fmt.Fprintf(out, "flutter_version=%s\nnode_version=%s\nxcode_version=%s\ngodot_version=%s\n", versions.Flutter, versions.Node, versions.Xcode, versions.Godot)
 	for _, note := range facts.Notes {
 		fmt.Fprintln(os.Stderr, note)
 	}
