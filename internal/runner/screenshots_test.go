@@ -186,3 +186,10 @@ func TestSimulatorTipsIncludeQuickPathIntroduction(t *testing.T) {
 		t.Fatal("the QuickPath introduction is not suppressed")
 	}
 }
+
+func TestSimulatorAppLogPredicateNamesTheApp(t *testing.T) {
+	got := simulatorAppLogPredicate(`Flow"Sip`)
+	if !strings.Contains(got, `process == "FlowSip"`) || !strings.Contains(got, `runningboardd`) || strings.Contains(got, `Flow"Sip`) {
+		t.Fatalf("got %s", got)
+	}
+}
