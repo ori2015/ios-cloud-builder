@@ -114,6 +114,11 @@ put nativescript package.json '{"dependencies":{"@nativescript/core":"~8.8.0"}}'
 put nativescript nativescript.config.ts $'export default {\n  id: \'example.generic.ns\',\n  appPath: \'src\',\n};'
 expect nativescript "ios_path=platforms/ios framework=nativescript bundle_id=example.generic.ns"
 
+# --- Sparkling (Lynx)
+put sparkling package.json '{"dependencies":{"@lynx-js/react":"^0.116.2"},"devDependencies":{"sparkling-app-cli":"~2.0.1"}}'
+pbx sparkling ios/App.xcodeproj/project.pbxproj example.generic.spk
+expect sparkling "ios_path=ios framework=sparkling bundle_id=example.generic.spk"
+
 # --- Kotlin Multiplatform
 put kmp settings.gradle.kts 'rootProject.name = "generic"'
 put kmp shared/build.gradle.kts 'plugins { kotlin("multiplatform") }'
