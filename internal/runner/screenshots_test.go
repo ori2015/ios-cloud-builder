@@ -152,10 +152,7 @@ func TestResolvedSimulatorEntitlementsFillsSigningVariables(t *testing.T) {
 }
 
 func TestAppendCrashReportsShowsOnlyThisAppsNewReports(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	dir := filepath.Join(home, "Library", "Logs", "DiagnosticReports")
-	_ = os.MkdirAll(dir, 0700)
+	dir := t.TempDir()
 	since := time.Now().Add(-time.Minute)
 	_ = os.WriteFile(filepath.Join(dir, "FlowSip-2026-10-20-120000.ips"), []byte("Exception Type: EXC_CRASH\nline2"), 0600)
 	_ = os.WriteFile(filepath.Join(dir, "Other-2026-10-20-120000.ips"), []byte("other app"), 0600)
@@ -163,7 +160,7 @@ func TestAppendCrashReportsShowsOnlyThisAppsNewReports(t *testing.T) {
 	_ = os.WriteFile(old, []byte("old crash"), 0600)
 	_ = os.Chtimes(old, since.Add(-time.Hour), since.Add(-time.Hour))
 	var log strings.Builder
-	appendCrashReports(&log, "FlowSip", since)
+	appendCrashReports(&log, dir, "FlowSip", since)
 	got := log.String()
 	if !strings.Contains(got, "EXC_CRASH") || strings.Contains(got, "other app") || strings.Contains(got, "old crash") {
 		t.Fatalf("got %q", got)

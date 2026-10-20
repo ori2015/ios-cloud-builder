@@ -305,7 +305,10 @@ func captureScreenshots(run executor, sourceRoot, appPath, entitlements, flow, o
 	stopFaceID := approveFaceIDWhileRunning(run, dir, sim.UDID)
 	flowErr := maestro.run(shots, "maestro", "--no-ansi", "--device", sim.UDID, "test", "--test-output-dir", output, flow)
 	stopFaceID()
-	appendCrashReports(run.log, filepath.Base(strings.TrimSuffix(appPath, ".app")), started)
+	if home, err := os.UserHomeDir(); err == nil {
+		appendCrashReports(run.log, filepath.Join(home, "Library", "Logs", "DiagnosticReports"),
+			filepath.Base(strings.TrimSuffix(appPath, ".app")), started)
+	}
 	images := collectFlowScreenshots(shots)
 	if len(images) == 0 && flowErr == nil {
 		return fmt.Errorf("the screenshot flow took no screenshots (use takeScreenshot)")
@@ -388,12 +391,7 @@ func collectFlowScreenshots(shots string) []string {
 
 // appendCrashReports copies the head of any crash report the simulator wrote for the app
 // during the flow into the private (encrypted) log, so a launch crash is diagnosable.
-func appendCrashReports(log io.Writer, executable string, since time.Time) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	dir := filepath.Join(home, "Library", "Logs", "DiagnosticReports")
+func appendCrashReports(log io.Writer, dir, executable string, since time.Time) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
