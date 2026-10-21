@@ -60,11 +60,32 @@ func runMaestroFlow(maestro executor, dir, udid, output, flow string) error {
 	args := []string{"--no-ansi", "--device", udid, "test", "--test-output-dir", output, flow}
 	out, err, timedOut := runMaestroAttempt(maestro, dir, args)
 	if err != nil && !timedOut && (isMaestroDriverStartupFailure(out) || !maestroReportedFailedStep(out)) {
+		if isMaestroDriverStartupFailure(out) {
+			// The XCTest driver never came up in this simulator session (seen even with a
+			// five-minute startup timeout): restart the simulator before the one retry.
+			fmt.Fprintln(maestro.log, "\nMaestro's driver did not start; restarting the simulator before the retry.")
+			restartSimulator(maestro, dir, udid)
+		}
 		fmt.Fprintln(maestro.log, "\nMaestro stopped without a failed step (driver startup or connection); retrying the flow once.")
 		_ = os.RemoveAll(output)
 		_, err, _ = runMaestroAttempt(maestro, dir, args)
 	}
 	return err
+}
+
+// restartSimulator shuts the simulator down and boots it again; installed apps stay.
+func restartSimulator(run executor, dir, udid string) {
+	_ = run.run(dir, "xcrun", "simctl", "shutdown", udid)
+	_ = run.run(dir, "xcrun", "simctl", "boot", udid)
+	_ = run.run(dir, "xcrun", "simctl", "bootstatus", udid, "-b")
+	overrideStatusBar(run, dir, udid)
+}
+
+// overrideStatusBar sets Apple's marketing status bar: 9:41, full battery and signal.
+func overrideStatusBar(run executor, dir, udid string) {
+	_ = run.run(dir, "xcrun", "simctl", "status_bar", udid, "override",
+		"--time", "9:41", "--dataNetwork", "wifi", "--wifiMode", "active", "--wifiBars", "3",
+		"--cellularMode", "active", "--cellularBars", "4", "--batteryState", "charged", "--batteryLevel", "100")
 }
 
 // maestroAttemptBudget bounds one flow attempt. Two attempts plus the simulator build and boot
@@ -355,10 +376,7 @@ func captureScreenshots(run executor, sourceRoot, appPath, entitlements, flow, o
 	for _, key := range simulatorTipsShown {
 		_ = run.run(dir, "xcrun", "simctl", "spawn", sim.UDID, "defaults", "write", "com.apple.Preferences", key, "-bool", "true")
 	}
-	// Apple's marketing status bar: 9:41, full battery and signal.
-	_ = run.run(dir, "xcrun", "simctl", "status_bar", sim.UDID, "override",
-		"--time", "9:41", "--dataNetwork", "wifi", "--wifiMode", "active", "--wifiBars", "3",
-		"--cellularMode", "active", "--cellularBars", "4", "--batteryState", "charged", "--batteryLevel", "100")
+	overrideStatusBar(run, dir, sim.UDID)
 	// Apple silicon simulators need at least an ad hoc signature; the build ran without signing.
 	_ = run.run(dir, "/usr/bin/codesign", "--force", "--deep", "--sign", "-", appPath)
 	if entitlements != "" {
