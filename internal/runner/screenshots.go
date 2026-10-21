@@ -28,6 +28,7 @@ const (
 	screenshotMediaDir = "media"
 	maxScreenshotMedia = 30
 	faceIDMatchEvery   = 2 * time.Second
+	systemAppWarmUp    = 20 * time.Second
 	// maestroDriverStartupTimeoutMs gives the XCTest driver five minutes to start.
 	maestroDriverStartupTimeoutMs = "300000"
 )
@@ -410,6 +411,7 @@ func captureScreenshots(run executor, sourceRoot, appPath, entitlements, flow, o
 	// Maestro 2.x writes takeScreenshot files to <test-output-dir>/takeScreenshot/; its own
 	// per-step debug screenshots go elsewhere in that folder and are not returned.
 	output := filepath.Join(shots, "maestro-output")
+	warmUpSystemApps(run, dir, sim.UDID)
 	stopFaceID := approveFaceIDWhileRunning(run, dir, sim.UDID)
 	flowErr := runMaestroFlow(maestro, shots, sim.UDID, output, flow)
 	stopFaceID()
@@ -610,4 +612,23 @@ func launchedPID(output []byte, bundleID string) string {
 		}
 	}
 	return ""
+}
+
+// systemAppsToWarm back the Files and Photos pickers. On a fresh simulator their services start
+// cold, and a picker opened by the app could stay blank or on "Loading..." past any sane wait.
+var systemAppsToWarm = []string{"com.apple.DocumentsApp", "com.apple.mobileslideshow"}
+
+// warmUpSystemApps opens each picker-backing system app briefly, then closes it (best effort).
+func warmUpSystemApps(run executor, dir, udid string) {
+	for _, app := range systemAppsToWarm {
+		if err := run.run(dir, "xcrun", "simctl", "launch", udid, app); err != nil {
+			continue
+		}
+		select {
+		case <-run.ctx.Done():
+			return
+		case <-time.After(systemAppWarmUp):
+		}
+		_ = run.run(dir, "xcrun", "simctl", "terminate", udid, app)
+	}
 }

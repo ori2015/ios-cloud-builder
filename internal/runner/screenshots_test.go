@@ -278,3 +278,16 @@ func TestDriverFailureRestartsTheSimulatorBeforeRetry(t *testing.T) {
 		t.Fatalf("unexpected call order:\n%s", order)
 	}
 }
+
+func TestSystemAppsToWarmCoverBothPickers(t *testing.T) {
+	// Regression: Stillbox's Files and Photos pickers stayed blank / "Loading..." on a cold simulator.
+	want := map[string]bool{"com.apple.DocumentsApp": false, "com.apple.mobileslideshow": false}
+	for _, app := range systemAppsToWarm {
+		want[app] = true
+	}
+	for app, ok := range want {
+		if !ok {
+			t.Fatalf("%s is not warmed up", app)
+		}
+	}
+}
