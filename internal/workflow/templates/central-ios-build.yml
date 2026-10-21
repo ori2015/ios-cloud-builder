@@ -34,7 +34,8 @@ permissions:
 jobs:
   build:
     runs-on: macos-26
-    timeout-minutes: 45
+    # Screenshot runs build, boot a simulator and drive the app (the runner bounds the flow itself).
+    timeout-minutes: ${{ inputs.operation == 'screenshots' && 90 || 45 }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 

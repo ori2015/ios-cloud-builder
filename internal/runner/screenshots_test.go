@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -231,5 +232,19 @@ func TestMaestroReportedFailedStep(t *testing.T) {
 	// Regression: Maestro died mid-step in a Trip Nearby run with no failed step; that is retried.
 	if maestroReportedFailedStep(aborted) {
 		t.Fatal("an aborted run counted as a failed step")
+	}
+}
+
+func TestMaestroAttemptStopsAtItsBudget(t *testing.T) {
+	// Regression: a Trip Nearby run hung until GitHub cancelled the job, losing log and images.
+	old := maestroAttemptBudget
+	maestroAttemptBudget = 200 * time.Millisecond
+	defer func() { maestroAttemptBudget = old }()
+	var log strings.Builder
+	run := executor{ctx: context.Background(), env: os.Environ(), log: &log}
+	started := time.Now()
+	_, err, timedOut := runMaestroAttemptWith(run, t.TempDir(), "sleep", []string{"5"})
+	if err == nil || !timedOut || time.Since(started) > 3*time.Second {
+		t.Fatalf("err=%v timedOut=%v after %s", err, timedOut, time.Since(started))
 	}
 }

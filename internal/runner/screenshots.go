@@ -58,13 +58,35 @@ func maestroReportedFailedStep(output []byte) bool {
 // or Maestro stopped without any failed step.
 func runMaestroFlow(maestro executor, dir, udid, output, flow string) error {
 	args := []string{"--no-ansi", "--device", udid, "test", "--test-output-dir", output, flow}
-	out, err := maestro.runCollect(dir, "maestro", args...)
-	if err != nil && (isMaestroDriverStartupFailure(out) || !maestroReportedFailedStep(out)) {
+	out, err, timedOut := runMaestroAttempt(maestro, dir, args)
+	if err != nil && !timedOut && (isMaestroDriverStartupFailure(out) || !maestroReportedFailedStep(out)) {
 		fmt.Fprintln(maestro.log, "\nMaestro stopped without a failed step (driver startup or connection); retrying the flow once.")
 		_ = os.RemoveAll(output)
-		_, err = maestro.runCollect(dir, "maestro", args...)
+		_, err, _ = runMaestroAttempt(maestro, dir, args)
 	}
 	return err
+}
+
+// maestroAttemptBudget bounds one flow attempt. Two attempts plus the simulator build and boot
+// stay inside the screenshot job's limit, so a hung flow ends here — with its images and log
+// still encrypted and returned — instead of GitHub cancelling the job and losing both.
+var maestroAttemptBudget = 25 * time.Minute
+
+func runMaestroAttempt(maestro executor, dir string, args []string) ([]byte, error, bool) {
+	return runMaestroAttemptWith(maestro, dir, "maestro", args)
+}
+
+func runMaestroAttemptWith(maestro executor, dir, program string, args []string) ([]byte, error, bool) {
+	ctx, cancel := context.WithTimeout(maestro.ctx, maestroAttemptBudget)
+	defer cancel()
+	attempt := maestro
+	attempt.ctx = ctx
+	out, err := attempt.runCollect(dir, program, args...)
+	if ctx.Err() == context.DeadlineExceeded {
+		fmt.Fprintf(maestro.log, "\nScreenshot flow exceeded its %s budget and was stopped.\n", maestroAttemptBudget)
+		return out, fmt.Errorf("screenshot flow exceeded %s", maestroAttemptBudget), true
+	}
+	return out, err, false
 }
 
 var screenshotMediaExtensions = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".heic": true, ".mov": true, ".mp4": true}
