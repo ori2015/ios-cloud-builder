@@ -45,3 +45,28 @@ func TestFilterDestinationArgs(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+// Regression: a test host that crashed (FlowSip, CloudKit without entitlement) was reported as
+// "no runnable simulator destination".
+func TestTestsReachedExecution(t *testing.T) {
+	ran := []string{
+		"Testing started\n",
+		"Testing failed:\n\tApp (1) encountered an error (Early unexpected exit)\n** TEST FAILED **",
+		"Test Suite 'All tests' started at 2026-10-21",
+	}
+	for _, out := range ran {
+		if !testsReachedExecution([]byte(out)) {
+			t.Errorf("expected execution for %q", out)
+		}
+	}
+	notRan := []string{
+		"xcodebuild: error: Unable to find a destination matching the provided destination specifier",
+		"error: call to main actor-isolated static method\n** TEST BUILD FAILED **",
+		"",
+	}
+	for _, out := range notRan {
+		if testsReachedExecution([]byte(out)) {
+			t.Errorf("expected no execution for %q", out)
+		}
+	}
+}
