@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -246,5 +247,34 @@ func TestMaestroAttemptStopsAtItsBudget(t *testing.T) {
 	_, err, timedOut := runMaestroAttemptWith(run, t.TempDir(), "sleep", []string{"5"})
 	if err == nil || !timedOut || time.Since(started) > 3*time.Second {
 		t.Fatalf("err=%v timedOut=%v after %s", err, timedOut, time.Since(started))
+	}
+}
+
+func TestDriverFailureRestartsTheSimulatorBeforeRetry(t *testing.T) {
+	// Regression: Stillbox's driver never started twice in the same simulator session.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixtures are POSIX-specific")
+	}
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	bin := filepath.Join(dir, "bin")
+	_ = os.MkdirAll(bin, 0700)
+	script := "#!/bin/sh\necho \"$(basename \"$0\") $*\" >> " + calls + "\n"
+	_ = os.WriteFile(filepath.Join(bin, "xcrun"), []byte(script), 0700)
+	maestro := script + "if [ ! -f " + calls + ".once ]; then touch " + calls + ".once; echo 'iOS driver not ready in time'; exit 1; fi\nexit 0\n"
+	_ = os.WriteFile(filepath.Join(bin, "maestro"), []byte(maestro), 0700)
+	t.Setenv("PATH", bin+":/usr/bin:/bin") // exec resolves programs from this process's PATH
+	var log strings.Builder
+	run := executor{ctx: context.Background(), env: []string{"PATH=" + bin + ":/usr/bin:/bin"}, log: &log}
+	if err := runMaestroFlow(run, dir, "UDID", filepath.Join(dir, "out"), "flow.yaml"); err != nil {
+		t.Fatalf("retry failed: %v\n%s", err, log.String())
+	}
+	got, _ := os.ReadFile(calls)
+	order := string(got)
+	shutdown := strings.Index(order, "xcrun simctl shutdown UDID")
+	boot := strings.Index(order, "xcrun simctl boot UDID")
+	second := strings.LastIndex(order, "maestro ")
+	if shutdown < 0 || boot < shutdown || second < boot || strings.Count(order, "maestro ") != 2 {
+		t.Fatalf("unexpected call order:\n%s", order)
 	}
 }
