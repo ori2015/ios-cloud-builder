@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -97,9 +98,14 @@ func runSimulatorTests(run executor, iosRoot, workspace, project, scheme, derive
 		"COMPILER_INDEX_STORE_ENABLE=NO",
 		"test",
 	)
-	err = run.run(iosRoot, "xcodebuild", args...)
+	output, err := run.runCollect(iosRoot, "xcodebuild", args...)
 	if err == nil {
 		return nil
+	}
+	// The tests ran (failed, or the host app crashed): that is the result, not a destination problem.
+	// Details stay in the private log; the error says only what kind of failure it was.
+	if testsReachedExecution(output) {
+		return fmt.Errorf("unit tests ran on the simulator and failed (see the private log): %w", err)
 	}
 	// Diagnostics (private log only): what Xcode thinks it can run on.
 	showArgs := filterOutDestination(append(append([]string{}, args[:len(args)-1]...), "-showdestinations"))
@@ -116,6 +122,17 @@ func runSimulatorTests(run executor, iosRoot, workspace, project, scheme, derive
 		return err
 	}
 	return fmt.Errorf("tests compiled but could not be executed (no runnable simulator destination)")
+}
+
+// testsReachedExecution reports whether xcodebuild got as far as running the test bundle, so a
+// failing or crashing test run is not mistaken for a missing simulator destination.
+func testsReachedExecution(output []byte) bool {
+	for _, marker := range []string{"Testing started", "Testing failed:", "Test Suite '", "Test session results"} {
+		if bytes.Contains(output, []byte(marker)) {
+			return true
+		}
+	}
+	return false
 }
 
 // filterDestinationArgs keeps only the container and scheme arguments.
